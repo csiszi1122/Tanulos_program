@@ -3,6 +3,7 @@ import { motion } from "motion/react";
 import type { TaskProps } from "../../../types/module";
 import { fireRewardConfetti } from "../../../components/effects/confetti";
 import { playSuccess, playClick } from "../../../core/audio/sfx";
+import { speakText } from "../../../core/audio/tts";
 import { PrimaryButton } from "../../../components/ui/PrimaryButton";
 
 type Cfg = { cardCount?: number };
@@ -49,9 +50,14 @@ export const ReadingCardsTask: FC<TaskProps<Cfg>> = ({ config, onComplete }) => 
         <p className="text-7xl">{card.emoji}</p>
         <p className="mt-4 text-4xl font-black tracking-wide text-white">{card.word}</p>
       </motion.div>
-      <PrimaryButton onClick={next}>
-        {index >= cards.length - 1 ? "Kész!" : "Következő"}
-      </PrimaryButton>
+      <div className="flex flex-wrap justify-center gap-2">
+        <PrimaryButton variant="ghost" onClick={() => speakText(card.word, "hu-HU")}>
+          Felolvasás
+        </PrimaryButton>
+        <PrimaryButton onClick={next}>
+          {index >= cards.length - 1 ? "Kész!" : "Következő"}
+        </PrimaryButton>
+      </div>
     </div>
   );
 };
