@@ -1,0 +1,137 @@
+---
+description: Architecture, stack, and module patterns for the kids educational desktop app
+alwaysApply: true
+---
+
+# Educational Desktop App — Architecture Rules
+
+These rules apply **only** to this Tanulós Program workspace. Follow them for every change.
+
+## Stack (required)
+
+- **Desktop:** Tauri v2 (Rust + WebView)
+- **UI:** React 19 + TypeScript + Vite
+- **Styling:** Tailwind CSS — vibrant gradients, glassmorphism, `rounded-2xl` / `rounded-3xl`
+- **Motion:** `motion/react` for micro-interactions and transitions
+- **Effects:** `canvas-confetti` (and Rive later for mascot); keep rewards instant
+- **Canvas / mini-games:** Pixi.js — keep game/canvas logic **separate** from React layout
+- **Data:** Dexie.js (IndexedDB) + static JSON / module config — offline-first
+
+## Directory layout
+
+```text
+src/
+├── assets/
+├── core/
+│   ├── audio/      # SFX hooks
+│   ├── db/         # Dexie schemas & helpers
+│   ├── layout/     # Shell, nav, main container
+│   └── store/      # Profile, score, streak
+├── components/
+│   ├── ui/         # Buttons, cards, motion wrappers
+│   └── effects/    # Confetti, reward particles
+├── modules/
+│   ├── math/
+│   ├── language/
+│   └── registry.ts
+├── types/module.ts
+├── App.tsx
+└── main.tsx
+```
+
+Never dump domain tasks into `components/` or `core/`. New subjects live under `src/modules/[name]/`.
+
+## Module contract (`src/types/module.ts`)
+
+Every module must implement `EducationalModule` and register in `modules/registry.ts`:
+
+```typescript
+export interface TaskProps<T = unknown> {
+  config: T;
+  onComplete: (score: number) => void;
+  onFail: () => void;
+}
+
+export interface EducationalModule {
+  id: string;
+  title: string;
+  description: string;
+  icon: string;
+  accentColor: string;
+  tasks: {
+    id: string;
+    title: string;
+    component: React.ComponentType<TaskProps>;
+  }[];
+}
+```
+
+## AI / implementation guidelines
+
+1. **Strict modular isolation** — tasks stay inside `src/modules/[module-name]/tasks/`.
+2. **Visual polishing** — rich Tailwind: gradients, glass panels, large touch targets, kid-friendly contrast.
+3. **Animations first** — wrap state changes and screens in `motion` / `AnimatePresence`; aim for 60 FPS, zero-latency feedback.
+4. **Performance** — avoid heavy re-renders; Pixi canvas logic stays outside React layout trees.
+5. **Feedback loop** — correct answers: color change + confetti + sound (optional) + then `onComplete(score)`.
+6. **Reuse existing UI** — use shared components from `components/ui` and `components/effects`; do not invent parallel button/toast/card systems.
+
+## Sample task pattern
+
+```tsx
+import { useState } from "react";
+import { motion } from "motion/react";
+import confetti from "canvas-confetti";
+import type { TaskProps } from "../../../types/module";
+
+export const SimpleAdditionTask: React.FC<TaskProps> = ({ onComplete }) => {
+  const [selected, setSelected] = useState<number | null>(null);
+  const correctAnswer = 8;
+  const options = [5, 8, 12, 6];
+
+  const handleSelect = (option: number) => {
+    setSelected(option);
+    if (option === correctAnswer) {
+      confetti({ particleCount: 80, spread: 60, origin: { y: 0.7 } });
+      setTimeout(() => onComplete(100), 1000);
+    }
+  };
+
+  return (
+    <div className="flex flex-col items-center justify-center p-8 space-y-6">
+      <motion.h2
+        initial={{ scale: 0.8, opacity: 0 }}
+        animate={{ scale: 1, opacity: 1 }}
+        className="text-4xl font-extrabold text-white"
+      >
+        Mennyi 5 + 3?
+      </motion.h2>
+      <div className="grid grid-cols-2 gap-4">
+        {options.map((option) => (
+          <motion.button
+            key={option}
+            whileHover={{ scale: 1.05 }}
+            whileTap={{ scale: 0.95 }}
+            onClick={() => handleSelect(option)}
+            className={`px-8 py-6 rounded-2xl text-2xl font-bold shadow-lg ${
+              selected === option
+                ? option === correctAnswer
+                  ? "bg-green-500 text-white"
+                  : "bg-red-500 text-white"
+                : "bg-indigo-600 hover:bg-indigo-500 text-white"
+            }`}
+          >
+            {option}
+          </motion.button>
+        ))}
+      </div>
+    </div>
+  );
+};
+```
+
+## UX defaults for this app
+
+- Instant feedback (color + confetti + motion)
+- Offline-first progression via Dexie
+- Kid-friendly shell: large type, rounded-2xl/3xl, glass panels, vivid gradients
+- Flow: home → module → task → reward → back

@@ -1,0 +1,17 @@
+{
+  "dailyGoalDefault": 3,
+  "modules": [
+    {
+      "id": "math",
+      "title": "Matek",
+      "description": "Számolás, játékok és fejtörők",
+      "enabledByDefault": true
+    },
+    {
+      "id": "language",
+      "title": "Nyelv",
+      "description": "Betűk, szavak és olvasás",
+      "enabledByDefault": true
+    }
+  ]
+}
