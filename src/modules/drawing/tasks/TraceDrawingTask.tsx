@@ -10,6 +10,7 @@ import {
   type DrawingTemplate,
 } from "../data/templates";
 import { TraceEngine } from "../engine/TraceEngine";
+import { PathPreview } from "../components/PathPreview";
 
 type Cfg = {
   winCoverage?: number;
@@ -21,7 +22,7 @@ type Mode = "gallery" | "draw";
 
 export const TraceDrawingTask: FC<TaskProps<Cfg>> = ({ config, onComplete }) => {
   const winCoverage = Math.min(0.95, Math.max(0.5, (config.winCoverage ?? 72) / 100));
-  const strokeWidth = config.strokeWidth ?? 20;
+  const strokeWidth = config.strokeWidth ?? 18;
   const drawingsToWin = Math.max(1, Math.round(config.drawingsToWin ?? 2));
 
   const [mode, setMode] = useState<Mode>("gallery");
@@ -48,7 +49,7 @@ export const TraceDrawingTask: FC<TaskProps<Cfg>> = ({ config, onComplete }) => 
     const engine = new TraceEngine(canvasRef.current, {
       strokeWidth,
       winCoverage,
-      hitRadius: 0.06,
+      hitRadius: 0.058,
       onCoverage: setCoverage,
       onWin: () => {
         if (wonRef.current) return;
@@ -68,7 +69,7 @@ export const TraceDrawingTask: FC<TaskProps<Cfg>> = ({ config, onComplete }) => 
               setTemplate(null);
               setCoverage(0);
             }
-          }, 1400);
+          }, 1500);
           return nextCount;
         });
       },
@@ -91,7 +92,7 @@ export const TraceDrawingTask: FC<TaskProps<Cfg>> = ({ config, onComplete }) => 
       engine.playGuide();
       setHintFlash(true);
       window.setTimeout(() => setHintFlash(false), 900);
-    }, 700);
+    }, 650);
 
     return () => {
       window.clearTimeout(hintTimer);
@@ -121,13 +122,15 @@ export const TraceDrawingTask: FC<TaskProps<Cfg>> = ({ config, onComplete }) => 
       <div className="flex h-full min-h-0 flex-col gap-3 sm:gap-4">
         <div className="flex flex-wrap items-end justify-between gap-2">
           <div>
-            <h3 className="text-xl font-semibold text-white sm:text-2xl">Rajzműhely</h3>
-            <p className="text-sm text-white/75">
-              Kövesd a vonalat ujjal — {finishedCount}/{drawingsToWin} kép kész
+            <h3 className="text-xl font-semibold tracking-tight text-white sm:text-2xl">
+              Vonalrajz stúdió
+            </h3>
+            <p className="text-sm text-white/70">
+              Kövesd a vonalat — {finishedCount}/{drawingsToWin} kép kész
             </p>
           </div>
           <PrimaryButton className="!min-h-12 !px-5" onClick={randomTemplate}>
-            Véletlen kép
+            Véletlen
           </PrimaryButton>
         </div>
 
@@ -142,8 +145,10 @@ export const TraceDrawingTask: FC<TaskProps<Cfg>> = ({ config, onComplete }) => 
                   playClick();
                   setCategory(cat);
                 }}
-                className={`min-h-11 shrink-0 rounded-full px-4 text-sm font-semibold ${
-                  active ? "bg-white text-slate-900" : "bg-white/15 text-white/85"
+                className={`min-h-11 shrink-0 rounded-2xl px-4 text-sm font-semibold transition-colors ${
+                  active
+                    ? "bg-white text-slate-900 shadow-md"
+                    : "bg-white/12 text-white/85 hover:bg-white/18"
                 }`}
               >
                 {cat}
@@ -158,19 +163,29 @@ export const TraceDrawingTask: FC<TaskProps<Cfg>> = ({ config, onComplete }) => 
               <motion.button
                 key={t.id}
                 type="button"
-                initial={{ opacity: 0, y: 12, scale: 0.96 }}
+                initial={{ opacity: 0, y: 10, scale: 0.97 }}
                 animate={{ opacity: 1, y: 0, scale: 1 }}
-                transition={{ delay: Math.min(i * 0.015, 0.35), type: "spring", stiffness: 380, damping: 28 }}
-                whileTap={{ scale: 0.96 }}
+                transition={{
+                  delay: Math.min(i * 0.012, 0.3),
+                  type: "spring",
+                  stiffness: 380,
+                  damping: 28,
+                }}
+                whileTap={{ scale: 0.97 }}
                 onClick={() => openTemplate(t)}
-                className="flex min-h-[7.5rem] flex-col items-center justify-center gap-2 rounded-3xl border border-white/25 bg-white/12 px-2 py-4 text-center shadow-lg backdrop-blur-md active:bg-white/20 sm:min-h-[8.5rem]"
-                style={{ boxShadow: `0 0 0 1px ${t.color}33 inset` }}
+                className="flex min-h-[8.5rem] flex-col overflow-hidden rounded-3xl border border-white/20 bg-white/10 text-left shadow-lg backdrop-blur-sm active:bg-white/16 sm:min-h-[9.5rem]"
               >
-                <span className="text-4xl sm:text-5xl">{t.emoji}</span>
-                <span className="text-sm font-semibold text-white sm:text-base">{t.title}</span>
-                <span className="text-[10px] font-medium uppercase tracking-wide text-white/55">
-                  {t.category}
-                </span>
+                <div className="relative mx-2 mt-2 aspect-square overflow-hidden rounded-2xl bg-white shadow-inner">
+                  <PathPreview paths={t.paths} color={t.color} strokeWidth={2.4} />
+                </div>
+                <div className="flex flex-1 flex-col justify-center px-3 py-2">
+                  <span className="truncate text-sm font-semibold text-white sm:text-base">
+                    {t.title}
+                  </span>
+                  <span className="text-[10px] font-medium uppercase tracking-wide text-white/50">
+                    {t.category} · {t.paths.length} vonal
+                  </span>
+                </div>
               </motion.button>
             ))}
           </div>
@@ -180,21 +195,63 @@ export const TraceDrawingTask: FC<TaskProps<Cfg>> = ({ config, onComplete }) => 
   }
 
   return (
-    <div className="flex h-full min-h-0 flex-col gap-2.5 sm:gap-3">
-      <div className="flex flex-wrap items-center justify-between gap-2">
+    <div className="relative flex h-full min-h-0 flex-col gap-2">
+      <div className="flex flex-wrap items-center justify-between gap-2 px-0.5">
         <div className="min-w-0">
           <p className="truncate text-lg font-semibold text-white sm:text-xl">
-            <span className="mr-2 text-2xl">{template?.emoji}</span>
             {template?.title}
           </p>
-          <p className="text-xs text-white/70 sm:text-sm">
-            Kövesd a szaggatott vonalat az ujjaddal
+          <p className="text-xs text-white/65 sm:text-sm">
+            {Math.round(coverage * 100)}% · cél {Math.round(winCoverage * 100)}% ·{" "}
+            {finishedCount}/{drawingsToWin}
           </p>
         </div>
-        <div className="flex flex-wrap gap-2">
+        <div className="h-2 w-28 overflow-hidden rounded-full bg-white/15 sm:w-40">
+          <motion.div
+            className="h-full rounded-full"
+            style={{ background: template?.color ?? "#fff" }}
+            animate={{ width: `${Math.round(coverage * 100)}%` }}
+            transition={{ type: "spring", stiffness: 220, damping: 28 }}
+          />
+        </div>
+      </div>
+
+      <div
+        ref={wrapRef}
+        className="relative min-h-0 flex-1 touch-none overflow-hidden rounded-[1.75rem] border border-white/25 bg-[#f4efe6] shadow-[0_20px_50px_rgba(0,0,0,0.25)]"
+      >
+        <canvas ref={canvasRef} className="absolute inset-0 h-full w-full touch-none" />
+        <AnimatePresence>
+          {celebrating ? (
+            <motion.div
+              initial={{ opacity: 0, scale: 0.9 }}
+              animate={{ opacity: 1, scale: 1 }}
+              exit={{ opacity: 0, scale: 1.04 }}
+              className="pointer-events-none absolute inset-0 flex items-center justify-center bg-slate-900/15 backdrop-blur-[1px]"
+            >
+              <motion.div
+                initial={{ y: 16 }}
+                animate={{ y: 0 }}
+                className="rounded-3xl border border-white/50 bg-white/90 px-8 py-5 text-center shadow-2xl"
+              >
+                <p className="text-2xl font-bold text-slate-800">Szép vonal!</p>
+                <p className="mt-1 text-sm text-slate-500">A tintád szépen folydogált</p>
+              </motion.div>
+            </motion.div>
+          ) : null}
+        </AnimatePresence>
+      </div>
+
+      {/* Floating bottom tool dock */}
+      <div className="pointer-events-none absolute inset-x-0 bottom-2 z-10 flex justify-center px-2 sm:bottom-3">
+        <motion.div
+          initial={{ y: 24, opacity: 0 }}
+          animate={{ y: 0, opacity: 1 }}
+          className="pointer-events-auto flex max-w-full items-center gap-2 rounded-[1.75rem] border border-white/40 bg-white/92 px-2 py-2 shadow-2xl backdrop-blur-md"
+        >
           <PrimaryButton
             variant="ghost"
-            className="!min-h-12 !px-4"
+            className="!min-h-12 !border-slate-200 !bg-slate-100 !px-4 !text-slate-800"
             onClick={() => {
               playClick();
               setMode("gallery");
@@ -205,7 +262,9 @@ export const TraceDrawingTask: FC<TaskProps<Cfg>> = ({ config, onComplete }) => 
           </PrimaryButton>
           <PrimaryButton
             variant="ghost"
-            className={`!min-h-12 !px-4 ${hintFlash ? "!bg-white/30" : ""}`}
+            className={`!min-h-12 !border-slate-200 !bg-slate-100 !px-4 !text-slate-800 ${
+              hintFlash ? "!bg-amber-100" : ""
+            }`}
             onClick={() => {
               playClick();
               engineRef.current?.playGuide();
@@ -217,7 +276,7 @@ export const TraceDrawingTask: FC<TaskProps<Cfg>> = ({ config, onComplete }) => 
           </PrimaryButton>
           <PrimaryButton
             variant="ghost"
-            className="!min-h-12 !px-4"
+            className="!min-h-12 !border-slate-200 !bg-slate-100 !px-4 !text-slate-800"
             onClick={() => {
               playClick();
               wonRef.current = false;
@@ -228,47 +287,7 @@ export const TraceDrawingTask: FC<TaskProps<Cfg>> = ({ config, onComplete }) => 
           >
             Törlés
           </PrimaryButton>
-        </div>
-      </div>
-
-      <div className="relative h-3 overflow-hidden rounded-full bg-white/15">
-        <motion.div
-          className="h-full rounded-full"
-          style={{ background: template?.color ?? "#fff" }}
-          initial={false}
-          animate={{ width: `${Math.round(coverage * 100)}%` }}
-          transition={{ type: "spring", stiffness: 220, damping: 28 }}
-        />
-      </div>
-      <p className="text-center text-xs font-semibold text-white/80 sm:text-sm">
-        {Math.round(coverage * 100)}% · cél {Math.round(winCoverage * 100)}% · kész{" "}
-        {finishedCount}/{drawingsToWin}
-      </p>
-
-      <div
-        ref={wrapRef}
-        className="relative min-h-0 flex-1 touch-none overflow-hidden rounded-3xl border border-white/25 bg-slate-950/25 shadow-inner"
-      >
-        <canvas ref={canvasRef} className="absolute inset-0 h-full w-full touch-none" />
-        <AnimatePresence>
-          {celebrating ? (
-            <motion.div
-              initial={{ opacity: 0, scale: 0.85 }}
-              animate={{ opacity: 1, scale: 1 }}
-              exit={{ opacity: 0, scale: 1.05 }}
-              className="pointer-events-none absolute inset-0 flex items-center justify-center bg-black/20 backdrop-blur-[2px]"
-            >
-              <motion.div
-                initial={{ y: 20 }}
-                animate={{ y: 0 }}
-                className="rounded-3xl bg-white/20 px-8 py-5 text-center shadow-xl"
-              >
-                <p className="text-4xl">{template?.emoji}</p>
-                <p className="mt-2 text-2xl font-bold text-white">Szép rajz!</p>
-              </motion.div>
-            </motion.div>
-          ) : null}
-        </AnimatePresence>
+        </motion.div>
       </div>
     </div>
   );

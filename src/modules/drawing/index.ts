@@ -5,18 +5,18 @@ import { ColorFillTask } from "./tasks/ColorFillTask";
 export const drawingModule: EducationalModule = {
   id: "drawing",
   title: "Rajzolás",
-  description: "Vonalrajz és színezés — részek, vonalak, sok szín, tablet-barát",
+  description: "Stúdió minőségű vonalrajz és színezőkönyv — tintás nyomkövetés, folyékony kitöltés",
   icon: "✏️",
   accentColor: "from-rose-500/80 to-orange-500/80",
   tasks: [
     {
       id: "trace-drawing",
-      title: "Vonalrajz műhely",
+      title: "Vonalrajz stúdió",
       component: TraceDrawingTask,
     },
     {
       id: "color-fill",
-      title: "Színező műhely",
+      title: "Színező stúdió",
       component: ColorFillTask,
     },
   ],

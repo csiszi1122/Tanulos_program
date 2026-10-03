@@ -179,6 +179,115 @@ export function bezier(p0: Pt, p1: Pt, p2: Pt, p3: Pt, steps = 28): Pt[] {
   return pts;
 }
 
+/** Chaikin corner-cutting for organic, ink-like curves. */
+export function smoothPath(points: Pt[], iterations = 2): Pt[] {
+  let pts = points;
+  for (let n = 0; n < iterations; n++) {
+    if (pts.length < 3) break;
+    const next: Pt[] = [pts[0]];
+    for (let i = 0; i < pts.length - 1; i++) {
+      const a = pts[i];
+      const b = pts[i + 1];
+      next.push(lerp(a, b, 0.25), lerp(a, b, 0.75));
+    }
+    next.push(pts[pts.length - 1]);
+    pts = next;
+  }
+  return pts;
+}
+
+/**
+ * Minimal SVG path parser (M L C Q Z + implicit).
+ * Coordinates are expected in a square viewBox (default 0..100).
+ */
+export function svgPath(d: string, view = 100): Pt[] {
+  const tokens = d.match(/[a-zA-Z]|-?\d*\.?\d+(?:e[-+]?\d+)?/g) ?? [];
+  let i = 0;
+  let cmd = "M";
+  let x = 0;
+  let y = 0;
+  let sx = 0;
+  let sy = 0;
+  const out: Pt[] = [];
+  const push = (px: number, py: number) => {
+    out.push({ x: px / view, y: py / view });
+    x = px;
+    y = py;
+  };
+  const num = () => Number(tokens[i++]);
+
+  while (i < tokens.length) {
+    const t = tokens[i];
+    if (/[a-zA-Z]/.test(t)) {
+      cmd = t;
+      i++;
+    }
+    const rel = cmd === cmd.toLowerCase();
+    const c = cmd.toUpperCase();
+    if (c === "M") {
+      const nx = num() + (rel ? x : 0);
+      const ny = num() + (rel ? y : 0);
+      push(nx, ny);
+      sx = x;
+      sy = y;
+      cmd = rel ? "l" : "L";
+    } else if (c === "L") {
+      push(num() + (rel ? x : 0), num() + (rel ? y : 0));
+    } else if (c === "H") {
+      push(num() + (rel ? x : 0), y);
+    } else if (c === "V") {
+      push(x, num() + (rel ? y : 0));
+    } else if (c === "C") {
+      const x1 = num() + (rel ? x : 0);
+      const y1 = num() + (rel ? y : 0);
+      const x2 = num() + (rel ? x : 0);
+      const y2 = num() + (rel ? y : 0);
+      const x3 = num() + (rel ? x : 0);
+      const y3 = num() + (rel ? y : 0);
+      const curve = bezier(
+        { x: x / view, y: y / view },
+        { x: x1 / view, y: y1 / view },
+        { x: x2 / view, y: y2 / view },
+        { x: x3 / view, y: y3 / view },
+        24,
+      );
+      for (let k = 1; k < curve.length; k++) out.push(curve[k]);
+      x = x3;
+      y = y3;
+    } else if (c === "Q") {
+      const x1 = num() + (rel ? x : 0);
+      const y1 = num() + (rel ? y : 0);
+      const x2 = num() + (rel ? x : 0);
+      const y2 = num() + (rel ? y : 0);
+      // Elevate quadratic to cubic
+      const c1x = x + (2 / 3) * (x1 - x);
+      const c1y = y + (2 / 3) * (y1 - y);
+      const c2x = x2 + (2 / 3) * (x1 - x2);
+      const c2y = y2 + (2 / 3) * (y1 - y2);
+      const curve = bezier(
+        { x: x / view, y: y / view },
+        { x: c1x / view, y: c1y / view },
+        { x: c2x / view, y: c2y / view },
+        { x: x2 / view, y: y2 / view },
+        20,
+      );
+      for (let k = 1; k < curve.length; k++) out.push(curve[k]);
+      x = x2;
+      y = y2;
+    } else if (c === "Z") {
+      if (out.length && dist(out[out.length - 1], { x: sx / view, y: sy / view }) > 1e-6) {
+        out.push({ x: sx / view, y: sy / view });
+      }
+      x = sx;
+      y = sy;
+    } else {
+      // unknown — skip one number to avoid infinite loop
+      i++;
+    }
+  }
+  return out;
+}
+
 export function scalePaths(paths: Pt[][], pad = 0.08): Pt[][] {
   let minX = 1;
   let minY = 1;
