@@ -53,7 +53,12 @@ export function ParentPanel({ onClose }: ParentPanelProps) {
 
   if (!settings) return null;
 
-  const enabled = new Set(settings.enabledModules.split(",").filter(Boolean));
+  const enabled = new Set(
+    settings.enabledModules
+      .split(",")
+      .map((s) => s.trim())
+      .filter(Boolean),
+  );
 
   const tryUnlock = () => {
     playClick();

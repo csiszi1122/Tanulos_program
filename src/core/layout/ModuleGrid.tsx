@@ -9,7 +9,7 @@ interface ModuleGridProps {
 
 export function ModuleGrid({ modules, onSelect }: ModuleGridProps) {
   return (
-    <div className="mx-auto grid max-w-4xl gap-3 sm:gap-5 sm:grid-cols-2">
+    <div className="mx-auto grid max-w-5xl grid-cols-1 gap-3 sm:grid-cols-2 sm:gap-4 md:grid-cols-3">
       {modules.map((mod, index) => (
         <GlassCard
           key={mod.id}
@@ -18,7 +18,7 @@ export function ModuleGrid({ modules, onSelect }: ModuleGridProps) {
           transition={{ delay: index * 0.06 }}
           whileHover={{ y: -3, scale: 1.015 }}
           whileTap={{ scale: 0.985 }}
-          className={`min-h-[7.5rem] cursor-pointer bg-gradient-to-br ${mod.accentColor}`}
+          className={`min-h-[6.75rem] cursor-pointer bg-gradient-to-br sm:min-h-[7.5rem] ${mod.accentColor}`}
           onClick={() => onSelect(mod.id)}
         >
           <div className="flex items-start gap-3 sm:gap-4">

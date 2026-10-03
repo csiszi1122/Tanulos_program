@@ -48,6 +48,9 @@ export interface DailyHistory {
   goalMet: number;
 }
 
+/** Bump when new modules must be auto-enabled for existing installs. */
+export const SETTINGS_CONTENT_VERSION = 2;
+
 export interface AppSettings {
   id: number;
   soundEnabled: boolean;
@@ -60,6 +63,21 @@ export interface AppSettings {
   dailyPlayMinutesLimit: number;
   adaptiveDifficulty: boolean;
   playlistJson: string;
+  /** Migration marker for newly introduced modules/features */
+  contentVersion?: number;
+}
+
+function parseModuleIds(csv?: string): string[] {
+  return (csv ?? "")
+    .split(",")
+    .map((s) => s.trim())
+    .filter(Boolean);
+}
+
+function ensureModuleEnabled(csv: string, moduleId: string): string {
+  const mods = parseModuleIds(csv);
+  if (!mods.includes(moduleId)) mods.push(moduleId);
+  return mods.join(",");
 }
 
 class TanulosDB extends Dexie {
@@ -112,6 +130,24 @@ class TanulosDB extends Dexie {
       settings: "id",
       dailyHistory: "++id, profileId, date, [profileId+date]",
     });
+    this.version(5)
+      .stores({
+        profiles: "++id, name",
+        progress: "++id, profileId",
+        achievements: "++id, profileId, key",
+        stickers: "++id, profileId, stickerId",
+        settings: "id",
+        dailyHistory: "++id, profileId, date, [profileId+date]",
+      })
+      .upgrade(async (tx) => {
+        const row = await tx.table("settings").get(1);
+        if (!row) return;
+        const enabled = ensureModuleEnabled(String(row.enabledModules ?? ""), "drawing");
+        await tx.table("settings").update(1, {
+          enabledModules: enabled,
+          contentVersion: SETTINGS_CONTENT_VERSION,
+        });
+      });
   }
 }
 
@@ -139,12 +175,13 @@ export async function ensureSettings(): Promise<AppSettings> {
       soundEnabled: true,
       parentPin: "1234",
       dailyGoal: 3,
-      enabledModules: "math,language,logic,memory,english,drawing",
+      enabledModules: "math,language,drawing,logic,memory,english",
       taskParamsJson: serializeTaskParams(defaultTaskParams()),
       themeMode: "vivid",
       dailyPlayMinutesLimit: 0,
       adaptiveDifficulty: true,
       playlistJson: serializePlaylists(DEFAULT_PLAYLISTS),
+      contentVersion: SETTINGS_CONTENT_VERSION,
     };
     await db.settings.put(settings);
     return settings;
@@ -171,8 +208,11 @@ export async function ensureSettings(): Promise<AppSettings> {
     settings.playlistJson = serializePlaylists(DEFAULT_PLAYLISTS);
     patched = true;
   }
-  if (settings.enabledModules && !settings.enabledModules.split(",").includes("drawing")) {
-    settings.enabledModules = `${settings.enabledModules},drawing`;
+  const version = settings.contentVersion ?? 0;
+  if (version < SETTINGS_CONTENT_VERSION) {
+    // One-time: unlock Rajzolás for existing tablet/desktop installs.
+    settings.enabledModules = ensureModuleEnabled(settings.enabledModules, "drawing");
+    settings.contentVersion = SETTINGS_CONTENT_VERSION;
     patched = true;
   }
   if (patched) await db.settings.put(settings);

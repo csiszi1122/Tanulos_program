@@ -9,15 +9,22 @@ import { drawingModule } from "./drawing";
 const ALL_MODULES: EducationalModule[] = [
   mathModule,
   languageModule,
+  drawingModule,
   logicModule,
   memoryModule,
   englishModule,
-  drawingModule,
 ];
 
 export function getModules(includeDisabled = false, enabledCsv?: string): EducationalModule[] {
   if (includeDisabled || !enabledCsv) return ALL_MODULES;
-  const enabled = new Set(enabledCsv.split(",").filter(Boolean));
+  const enabled = new Set(
+    enabledCsv
+      .split(",")
+      .map((s) => s.trim())
+      .filter(Boolean),
+  );
+  // If settings are empty/corrupt, show everything rather than a blank home.
+  if (enabled.size === 0) return ALL_MODULES;
   return ALL_MODULES.filter((m) => enabled.has(m.id));
 }
 
