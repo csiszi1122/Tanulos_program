@@ -101,7 +101,7 @@ export class ColorEngine {
     this.particles = [];
     this.phase = "paint";
     this.lifeT = 0;
-    this.lifeStyle = lifeStyleFor(template.id, template.category);
+    this.lifeStyle = lifeStyleFor(template.id, template.category, template.life);
     for (const s of template.strokes) {
       this.strokes.set(s.id, {
         samples: resamplePath(s.points, 0.014).map((p) => ({ ...p, painted: false })),
@@ -417,41 +417,57 @@ export class ColorEngine {
     if (!this.template) return;
     const pulse = 0.5 + 0.5 * Math.sin(now * 0.004);
 
+    // Opaque soft-gradient fills (no muddy stacking)
     for (const region of this.template.regions) {
       const fill = this.fills.get(region.id);
       const anim = this.fillAnims.find((a) => a.regionId === region.id);
       ctx.save();
-      this.pathPoly(region.points);
+      this.pathPoly(region.points, 0.985);
       if (fill) {
         if (anim && anim.progress < 1) {
           const o = this.mapPt(anim.origin);
           ctx.clip();
+          const grad = ctx.createRadialGradient(
+            o.x,
+            o.y,
+            2,
+            o.x,
+            o.y,
+            Math.hypot(cssW, cssH) * anim.progress,
+          );
+          grad.addColorStop(0, shade(anim.color, 0.14));
+          grad.addColorStop(0.65, anim.color);
+          grad.addColorStop(1, shade(anim.color, -0.1));
+          ctx.fillStyle = grad;
+          ctx.globalAlpha = 1;
           ctx.beginPath();
           ctx.arc(o.x, o.y, Math.hypot(cssW, cssH) * anim.progress, 0, Math.PI * 2);
-          ctx.fillStyle = anim.color;
-          ctx.globalAlpha = 0.94;
           ctx.fill();
         } else {
-          ctx.fillStyle = fill;
-          ctx.globalAlpha = 0.94;
+          const a = this.mapPt({ x: 0.3, y: 0.28 });
+          const b = this.mapPt({ x: 0.75, y: 0.8 });
+          const grad = ctx.createLinearGradient(a.x, a.y, b.x, b.y);
+          grad.addColorStop(0, shade(fill, 0.12));
+          grad.addColorStop(0.5, fill);
+          grad.addColorStop(1, shade(fill, -0.14));
+          ctx.fillStyle = grad;
+          ctx.globalAlpha = 1;
           ctx.fill();
-          ctx.clip();
-          const gloss = ctx.createLinearGradient(0, 0, cssW, cssH);
-          gloss.addColorStop(0, "rgba(255,255,255,0.28)");
-          gloss.addColorStop(0.5, "rgba(255,255,255,0)");
-          ctx.fillStyle = gloss;
-          ctx.fillRect(0, 0, cssW, cssH);
         }
       } else {
-        ctx.fillStyle = `rgba(148,163,184,${0.08 + pulse * 0.04})`;
+        ctx.fillStyle = `rgba(241,245,249,${0.65 + pulse * 0.1})`;
         ctx.fill();
       }
       ctx.restore();
+    }
 
+    // Black outlines on top — keeps each color readable
+    for (const region of this.template.regions) {
       ctx.save();
-      ctx.strokeStyle = "rgba(15,23,42,0.55)";
-      ctx.lineWidth = 2.8;
+      ctx.strokeStyle = "#0f172a";
+      ctx.lineWidth = 3;
       ctx.lineJoin = "round";
+      ctx.globalAlpha = 1;
       this.strokePoly(region.points);
       ctx.restore();
     }
@@ -511,14 +527,25 @@ export class ColorEngine {
     ctx.globalAlpha = 1;
   }
 
-  private pathPoly(points: Pt[]) {
+  private pathPoly(points: Pt[], inset = 1) {
     const { ctx } = this;
+    let cx = 0;
+    let cy = 0;
+    for (const q of points) {
+      cx += q.x;
+      cy += q.y;
+    }
+    cx /= Math.max(1, points.length);
+    cy /= Math.max(1, points.length);
     ctx.beginPath();
-    const f = this.mapPt(points[0]);
-    ctx.moveTo(f.x, f.y);
-    for (let i = 1; i < points.length; i++) {
-      const p = this.mapPt(points[i]);
-      ctx.lineTo(p.x, p.y);
+    for (let i = 0; i < points.length; i++) {
+      const q = {
+        x: cx + (points[i].x - cx) * inset,
+        y: cy + (points[i].y - cy) * inset,
+      };
+      const p = this.mapPt(q);
+      if (i === 0) ctx.moveTo(p.x, p.y);
+      else ctx.lineTo(p.x, p.y);
     }
     ctx.closePath();
   }
@@ -608,4 +635,14 @@ function star(ctx: CanvasRenderingContext2D, x: number, y: number, r: number) {
   }
   ctx.closePath();
   ctx.fill();
+}
+
+function shade(hex: string, amt: number): string {
+  const h = hex.replace("#", "");
+  const full = h.length === 3 ? h.split("").map((c) => c + c).join("") : h;
+  const n = parseInt(full, 16);
+  const r = Math.min(255, Math.max(0, ((n >> 16) & 255) + Math.round(amt * 255)));
+  const g = Math.min(255, Math.max(0, ((n >> 8) & 255) + Math.round(amt * 255)));
+  const b = Math.min(255, Math.max(0, (n & 255) + Math.round(amt * 255)));
+  return `rgb(${r},${g},${b})`;
 }

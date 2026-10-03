@@ -1,28 +1,42 @@
 import type { Pt } from "./pathMath";
-import { pointOnPath } from "./pathMath";
 
 export type LifeStyle =
-  | "bounce"
-  | "swim"
+  | "walk"
   | "fly"
-  | "wiggle"
+  | "swim"
+  | "drive"
+  | "flutter"
+  | "float"
   | "spin"
-  | "pulse"
-  | "hop";
+  | "bloom"
+  | "sway"
+  | "hop"
+  | "wiggle";
 
-export function lifeStyleFor(id: string, category?: string): LifeStyle {
+export function lifeStyleFor(
+  id: string,
+  category?: string,
+  explicit?: LifeStyle,
+): LifeStyle {
+  if (explicit) return explicit;
   const key = `${id} ${category ?? ""}`.toLowerCase();
-  if (/fish|whale|duck|boat|hajó|hal/.test(key)) return "swim";
-  if (/bird|butterfly|plane|rocket|ufo|balloon|madár|pillangó|repülő|rakéta/.test(key))
-    return "fly";
-  if (/car|bus|train|bike|autó|busz|vonat/.test(key)) return "hop";
+  if (/butterfly|pillangó|insect|bogár|flutter/.test(key)) return "flutter";
+  if (/fish|whale|duck|boat|hajó|hal|swim/.test(key)) return "swim";
+  if (/bird|madár|soar|flap/.test(key)) return "fly";
+  if (/plane|rocket|ufo|balloon|repülő|rakéta/.test(key)) return "fly";
+  if (/car|bus|train|bike|autó|busz|vonat|drive/.test(key)) return "drive";
+  if (/bunny|nyuszi|hop/.test(key)) return "hop";
   if (/star|sun|planet|moon|csillag|nap|bolygó/.test(key)) return "spin";
-  if (/flower|tree|heart|virág|fa|szív/.test(key)) return "pulse";
-  if (/cat|dog|fox|bunny|bear|cica|kutya|róka/.test(key)) return "bounce";
+  if (/flower|tree|plant|virág|fa|növény|sway|bloom/.test(key)) return "sway";
+  if (/heart|szív/.test(key)) return "bloom";
+  if (/cat|dog|fox|bear|horse|cica|kutya|róka|ló|walk|trot/.test(key)) return "walk";
   return "wiggle";
 }
 
-/** Transform a normalized point for the "come alive" phase. */
+/**
+ * Character-specific "come alive" motion in normalized space.
+ * Includes travel (walk/drive/fly paths), not only in-place bobbing.
+ */
 export function lifeTransform(
   p: Pt,
   style: LifeStyle,
@@ -36,68 +50,108 @@ export function lifeTransform(
   const dy = p.y - cy;
 
   switch (style) {
-    case "bounce": {
-      const bob = Math.sin(t * 5.2) * 0.028 * s;
-      const squash = 1 + Math.sin(t * 5.2) * 0.04 * s;
-      return { x: cx + dx * (2 - squash), y: cy + dy * squash + bob };
+    case "walk": {
+      // Cat/dog: stroll left-right + leg-cycle bob
+      const travel = Math.sin(t * 0.85) * 0.1 * s;
+      const bob = Math.abs(Math.sin(t * 6.5)) * 0.022 * s;
+      const lean = Math.sin(t * 6.5) * 0.018 * s;
+      return { x: p.x + travel + lean * dy * 2, y: p.y - bob };
     }
-    case "swim": {
-      const wave = Math.sin(t * 3.4 + p.y * 8) * 0.035 * s;
-      const bob = Math.sin(t * 2.6) * 0.02 * s;
-      return { x: p.x + wave, y: p.y + bob };
+    case "hop": {
+      const travel = Math.sin(t * 1.1) * 0.08 * s;
+      const hop = Math.max(0, Math.sin(t * 5.2)) * 0.07 * s;
+      return { x: p.x + travel, y: p.y - hop };
     }
-    case "fly": {
-      const bob = Math.sin(t * 4.2) * 0.04 * s;
-      const sway = Math.sin(t * 2.1) * 0.03 * s;
-      const flap = 1 + Math.sin(t * 10) * 0.03 * s;
-      return { x: cx + dx * flap + sway, y: cy + dy * flap + bob };
-    }
-    case "wiggle": {
-      const a = Math.sin(t * 6) * 0.12 * s;
-      const cos = Math.cos(a);
-      const sin = Math.sin(a);
+    case "drive": {
+      // Car/bus: drive across with slight suspension bounce + wheel lean
+      const travel = Math.sin(t * 0.7) * 0.14 * s;
+      const bounce = Math.abs(Math.sin(t * 8)) * 0.012 * s;
+      const nose = Math.sin(t * 0.7) * 0.025 * s;
       return {
-        x: cx + dx * cos - dy * sin,
-        y: cy + dx * sin + dy * cos + Math.sin(t * 3) * 0.015 * s,
+        x: p.x + travel,
+        y: p.y - bounce + nose * (p.x - 0.5),
       };
     }
+    case "swim": {
+      const travel = Math.sin(t * 0.75) * 0.1 * s;
+      const wave = Math.sin(t * 3.2 + p.y * 10) * 0.03 * s;
+      const bob = Math.sin(t * 2.4) * 0.018 * s;
+      return { x: p.x + travel + wave, y: p.y + bob };
+    }
+    case "fly": {
+      const travelX = Math.sin(t * 0.9) * 0.12 * s;
+      const travelY = Math.cos(t * 1.1) * 0.06 * s;
+      const bank = Math.sin(t * 0.9) * 0.08 * s;
+      return {
+        x: cx + dx * Math.cos(bank) - dy * Math.sin(bank) + travelX,
+        y: cy + dx * Math.sin(bank) + dy * Math.cos(bank) + travelY,
+      };
+    }
+    case "flutter": {
+      // Butterfly: figure-8 path + rapid wing flap scale
+      const fx = Math.sin(t * 1.4) * 0.14 * s;
+      const fy = Math.sin(t * 2.8) * 0.07 * s;
+      const flap = 1 + Math.sin(t * 14) * 0.08 * s;
+      return { x: cx + dx * flap + fx, y: cy + dy * (2 - flap) + fy };
+    }
     case "spin": {
-      const a = t * 1.8 * s;
+      const a = t * 1.6 * s;
       const cos = Math.cos(a);
       const sin = Math.sin(a);
-      const scale = 1 + Math.sin(t * 3) * 0.05 * s;
+      const scale = 1 + Math.sin(t * 3) * 0.06 * s;
       return {
         x: cx + (dx * cos - dy * sin) * scale,
         y: cy + (dx * sin + dy * cos) * scale,
       };
     }
-    case "pulse": {
-      const scale = 1 + Math.sin(t * 4) * 0.07 * s;
-      return { x: cx + dx * scale, y: cy + dy * scale };
+    case "bloom": {
+      const scale = 1 + Math.sin(t * 2.2) * 0.08 * s + Math.sin(t * 0.5) * 0.03 * s;
+      const swayAmt = Math.sin(t * 1.5) * 0.02 * s;
+      return { x: cx + dx * scale + swayAmt, y: cy + dy * scale };
     }
-    case "hop": {
-      const hop = Math.abs(Math.sin(t * 4.5)) * 0.045 * s;
-      const lean = Math.sin(t * 4.5) * 0.02 * s;
-      return { x: p.x + lean, y: p.y - hop };
+    case "sway": {
+      // Flower/plant: gentle stem lean from the base
+      const lean = Math.sin(t * 1.35) * 0.06 * s;
+      const bob = Math.sin(t * 2.1) * 0.012 * s;
+      const height = Math.max(0, 0.85 - p.y);
+      return {
+        x: p.x + lean * height,
+        y: p.y - bob * height,
+      };
     }
-    default:
-      return p;
+    case "float": {
+      const bob = Math.sin(t * 2) * 0.035 * s;
+      const drift = Math.sin(t * 0.8) * 0.04 * s;
+      return { x: p.x + drift, y: p.y + bob };
+    }
+    case "wiggle":
+    default: {
+      const a = Math.sin(t * 5) * 0.1 * s;
+      const cos = Math.cos(a);
+      const sin = Math.sin(a);
+      return {
+        x: cx + dx * cos - dy * sin,
+        y: cy + dx * sin + dy * cos + Math.sin(t * 2.5) * 0.015 * s,
+      };
+    }
   }
 }
 
 export function lifeAccentPoint(style: LifeStyle, t: number): Pt {
   switch (style) {
+    case "drive":
+      return { x: 0.5 + Math.sin(t * 0.7) * 0.2, y: 0.72 };
+    case "walk":
+    case "hop":
+      return { x: 0.5 + Math.sin(t * 0.85) * 0.15, y: 0.78 };
     case "swim":
-      return pointOnPath(
-        [
-          { x: 0.2, y: 0.55 },
-          { x: 0.5, y: 0.45 },
-          { x: 0.8, y: 0.55 },
-        ],
-        (Math.sin(t * 0.7) + 1) / 2,
-      );
+      return { x: 0.5 + Math.sin(t * 0.75) * 0.18, y: 0.55 + Math.sin(t * 2) * 0.05 };
     case "fly":
-      return { x: 0.5 + Math.sin(t * 1.2) * 0.2, y: 0.3 + Math.cos(t * 1.5) * 0.08 };
+    case "flutter":
+      return { x: 0.5 + Math.sin(t * 1.3) * 0.2, y: 0.35 + Math.cos(t * 1.6) * 0.1 };
+    case "sway":
+    case "bloom":
+      return { x: 0.5 + Math.sin(t * 1.35) * 0.08, y: 0.28 + Math.sin(t * 2) * 0.04 };
     default:
       return { x: 0.5 + Math.sin(t) * 0.1, y: 0.35 + Math.cos(t * 1.3) * 0.06 };
   }

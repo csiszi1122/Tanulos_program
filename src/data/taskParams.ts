@@ -147,11 +147,11 @@ export const TASK_PARAM_SCHEMAS: TaskParamSchema[] = [
     params: [
       {
         key: "partCoverage",
-        label: "Rész körberajzolás %",
-        min: 45,
-        max: 90,
+        label: "Rész körberajzolás % (magasabb = szigorúbb)",
+        min: 80,
+        max: 98,
         step: 1,
-        default: 60,
+        default: 90,
       },
       {
         key: "strokeWidth",

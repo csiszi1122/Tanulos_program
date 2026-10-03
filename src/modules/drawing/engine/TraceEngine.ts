@@ -72,7 +72,7 @@ export class TraceEngine {
     this.opts = {
       strokeWidth: opts.strokeWidth ?? 16,
       hitRadius: opts.hitRadius ?? 0.06,
-      partCoverage: opts.partCoverage ?? 0.62,
+      partCoverage: opts.partCoverage ?? 0.9,
       onProgress: opts.onProgress ?? (() => undefined),
       onPartComplete: opts.onPartComplete ?? (() => undefined),
       onAllComplete: opts.onAllComplete ?? (() => undefined),
@@ -95,7 +95,7 @@ export class TraceEngine {
     this.template = template;
     this.phase = "draw";
     this.lifeT = 0;
-    this.lifeStyle = lifeStyleFor(template.id, template.category);
+    this.lifeStyle = lifeStyleFor(template.id, template.category, template.life);
     this.userStrokes = [];
     this.currentStroke = null;
     this.particles = [];
@@ -215,22 +215,28 @@ export class TraceEngine {
         changed = true;
       }
     }
-    if (!changed) return;
+    if (changed) this.emitProgress();
+  }
 
+  /**
+   * Fill only after a nearly complete outline — never mid-stroke.
+   * Requires high coverage AND returning near the start (closed loop),
+   * or near-total coverage with the pointer back at the outline start.
+   */
+  private tryCompleteActive(end: Pt) {
+    const part = this.activePart();
+    if (!part || part.outlineDone || !this.currentStroke) return;
     const cov =
       part.samples.filter((s) => s.covered).length / Math.max(1, part.samples.length);
-    this.emitProgress();
-
-    // Closed loop heuristic: stroke ends near start and covers enough
-    const loopBonus =
-      this.currentStroke &&
-      this.currentStroke.length > 12 &&
-      dist(this.currentStroke[0], p) < 0.08
-        ? 0.12
-        : 0;
-
-    if (cov + loopBonus >= this.opts.partCoverage) {
-      this.completePart(part, p);
+    const first = this.currentStroke[0];
+    const outlineStart = part.region.points[0];
+    const closedLoop =
+      this.currentStroke.length >= 22 && dist(first, end) <= 0.08;
+    const nearOutlineStart = dist(end, outlineStart) <= 0.1;
+    const nearlyDone = cov >= this.opts.partCoverage;
+    // No early fill: coverage alone is never enough without closing near start
+    if (nearlyDone && (closedLoop || (cov >= 0.96 && nearOutlineStart))) {
+      this.completePart(part, end);
     }
   }
 
@@ -358,18 +364,8 @@ export class TraceEngine {
       }
       if (this.currentStroke && this.currentStroke.length > 2) {
         this.userStrokes.push({ pts: this.currentStroke, color: this.color });
-        // final loop check
-        const part = this.activePart();
-        if (part && !part.outlineDone) {
-          const first = this.currentStroke[0];
-          const last = this.currentStroke[this.currentStroke.length - 1];
-          const cov =
-            part.samples.filter((s) => s.covered).length /
-            Math.max(1, part.samples.length);
-          if (dist(first, last) < 0.1 && cov >= this.opts.partCoverage * 0.75) {
-            this.completePart(part, last);
-          }
-        }
+        const last = this.currentStroke[this.currentStroke.length - 1];
+        this.tryCompleteActive(last);
       }
       this.currentStroke = null;
     };
@@ -474,87 +470,101 @@ export class TraceEngine {
     if (!this.template) return;
     const pulse = 0.5 + 0.5 * Math.sin(now * 0.005);
 
-    // filled parts
+    // Opaque fills first (no stacking transparency between parts)
     for (const part of this.parts) {
       if (!part.fillColor) continue;
       ctx.save();
-      this.pathPoly(part.region.points);
+      this.pathPoly(part.region.points, 0.985);
       if (part.fillProgress < 1) {
         const o = this.mapPt(part.fillOrigin);
         ctx.clip();
+        const grad = ctx.createRadialGradient(
+          o.x,
+          o.y,
+          4,
+          o.x,
+          o.y,
+          Math.hypot(cssW, cssH) * part.fillProgress,
+        );
+        grad.addColorStop(0, shade(part.fillColor, 0.12));
+        grad.addColorStop(0.7, part.fillColor);
+        grad.addColorStop(1, shade(part.fillColor, -0.08));
+        ctx.fillStyle = grad;
+        ctx.globalAlpha = 1;
         ctx.beginPath();
         ctx.arc(o.x, o.y, Math.hypot(cssW, cssH) * part.fillProgress, 0, Math.PI * 2);
-        ctx.fillStyle = part.fillColor;
-        ctx.globalAlpha = 0.94;
         ctx.fill();
       } else {
-        ctx.fillStyle = part.fillColor;
-        ctx.globalAlpha = 0.94;
+        const c0 = this.mapPt({ x: 0.35, y: 0.3 });
+        const c1 = this.mapPt({ x: 0.7, y: 0.75 });
+        const grad = ctx.createLinearGradient(c0.x, c0.y, c1.x, c1.y);
+        grad.addColorStop(0, shade(part.fillColor, 0.1));
+        grad.addColorStop(0.55, part.fillColor);
+        grad.addColorStop(1, shade(part.fillColor, -0.12));
+        ctx.fillStyle = grad;
+        ctx.globalAlpha = 1;
         ctx.fill();
-        // subtle gloss
-        ctx.clip();
-        const gloss = ctx.createLinearGradient(0, 0, 0, cssH);
-        gloss.addColorStop(0, "rgba(255,255,255,0.22)");
-        gloss.addColorStop(0.45, "rgba(255,255,255,0)");
-        ctx.fillStyle = gloss;
-        ctx.fillRect(0, 0, cssW, cssH);
       }
       ctx.restore();
     }
 
-    // outlines for all parts
+    // Crisp black outlines ON TOP so colors stay visually separated
     for (let i = 0; i < this.parts.length; i++) {
       const part = this.parts[i];
       const active = i === this.activeIndex && this.phase === "draw";
       ctx.save();
       ctx.lineJoin = "round";
       ctx.lineCap = "round";
-      if (part.outlineDone) {
-        ctx.strokeStyle = "rgba(15,23,42,0.55)";
-        ctx.lineWidth = 2.5;
-      } else if (active) {
-        ctx.setLineDash([7, 10]);
+      ctx.globalAlpha = 1;
+      if (active && !part.outlineDone) {
+        ctx.setLineDash([8, 10]);
         ctx.lineDashOffset = -now * 0.05;
-        ctx.strokeStyle = `rgba(37,99,235,${0.45 + pulse * 0.35})`;
-        ctx.lineWidth = 3.5;
-        ctx.shadowColor = "rgba(37,99,235,0.45)";
-        ctx.shadowBlur = 12;
+        ctx.strokeStyle = `rgba(37,99,235,${0.55 + pulse * 0.35})`;
+        ctx.lineWidth = 3.8;
+        ctx.shadowColor = "rgba(37,99,235,0.35)";
+        ctx.shadowBlur = 10;
       } else {
-        ctx.strokeStyle = "rgba(100,116,139,0.35)";
-        ctx.lineWidth = 2;
+        ctx.strokeStyle = "#0f172a";
+        ctx.lineWidth = part.outlineDone ? 3.2 : 2.4;
       }
       this.strokePoly(part.region.points);
       ctx.restore();
 
-      // covered outline glow for active part
       if (active && !part.outlineDone) {
         ctx.save();
         ctx.strokeStyle = this.color;
         ctx.shadowColor = this.color;
-        ctx.shadowBlur = 14;
-        ctx.lineWidth = this.opts.strokeWidth * 0.75;
+        ctx.shadowBlur = 10;
+        ctx.lineWidth = this.opts.strokeWidth * 0.7;
         ctx.lineCap = "round";
         this.strokeCovered(part);
         ctx.restore();
       }
     }
 
-    // user strokes
+    // Decorative strokes from template
+    if (this.template.strokes?.length) {
+      ctx.save();
+      ctx.strokeStyle = "#0f172a";
+      ctx.lineWidth = 2.2;
+      ctx.lineCap = "round";
+      for (const s of this.template.strokes) this.strokePts(s.points);
+      ctx.restore();
+    }
+
+    // User ink (semi-transparent so filled colors remain readable underneath)
     ctx.save();
     ctx.lineCap = "round";
     ctx.lineJoin = "round";
-    ctx.globalAlpha = 0.9;
+    ctx.globalAlpha = 0.55;
     for (const stroke of this.userStrokes) {
       ctx.strokeStyle = stroke.color;
-      ctx.shadowColor = stroke.color;
-      ctx.shadowBlur = 8;
-      ctx.lineWidth = this.opts.strokeWidth;
+      ctx.lineWidth = this.opts.strokeWidth * 0.85;
       this.strokePts(stroke.pts);
     }
     if (this.currentStroke) {
+      ctx.globalAlpha = 0.85;
       ctx.strokeStyle = this.color;
-      ctx.shadowColor = this.color;
-      ctx.shadowBlur = 10;
       ctx.lineWidth = this.opts.strokeWidth;
       this.strokePts(this.currentStroke);
     }
@@ -622,15 +632,26 @@ export class TraceEngine {
     ctx.globalAlpha = 1;
   }
 
-  private pathPoly(points: Pt[]) {
+  private pathPoly(points: Pt[], inset = 1) {
     const { ctx } = this;
     if (points.length < 2) return;
+    let cx = 0;
+    let cy = 0;
+    for (const q of points) {
+      cx += q.x;
+      cy += q.y;
+    }
+    cx /= points.length;
+    cy /= points.length;
     ctx.beginPath();
-    const f = this.mapPt(points[0]);
-    ctx.moveTo(f.x, f.y);
-    for (let i = 1; i < points.length; i++) {
-      const p = this.mapPt(points[i]);
-      ctx.lineTo(p.x, p.y);
+    for (let i = 0; i < points.length; i++) {
+      const q = {
+        x: cx + (points[i].x - cx) * inset,
+        y: cy + (points[i].y - cy) * inset,
+      };
+      const p = this.mapPt(q);
+      if (i === 0) ctx.moveTo(p.x, p.y);
+      else ctx.lineTo(p.x, p.y);
     }
     ctx.closePath();
   }
@@ -722,4 +743,15 @@ function drawStar(
   }
   ctx.closePath();
   ctx.fill();
+}
+
+/** Lighten/darken hex color for soft gradients without muddy overlays. */
+function shade(hex: string, amt: number): string {
+  const h = hex.replace("#", "");
+  const full = h.length === 3 ? h.split("").map((c) => c + c).join("") : h;
+  const n = parseInt(full, 16);
+  const r = Math.min(255, Math.max(0, ((n >> 16) & 255) + Math.round(amt * 255)));
+  const g = Math.min(255, Math.max(0, ((n >> 8) & 255) + Math.round(amt * 255)));
+  const b = Math.min(255, Math.max(0, (n & 255) + Math.round(amt * 255)));
+  return `rgb(${r},${g},${b})`;
 }

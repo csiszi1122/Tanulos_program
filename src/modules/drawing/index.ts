@@ -5,7 +5,7 @@ import { ColorFillTask } from "./tasks/ColorFillTask";
 export const drawingModule: EducationalModule = {
   id: "drawing",
   title: "Rajzolás",
-  description: "Stúdió minőségű vonalrajz és színezőkönyv — tintás nyomkövetés, folyékony kitöltés",
+  description: "Színes vonalrajz, részenkénti kitöltés, életre kelő animáció",
   icon: "✏️",
   accentColor: "from-rose-500/80 to-orange-500/80",
   tasks: [

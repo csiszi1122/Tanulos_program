@@ -22,7 +22,7 @@ type Cfg = {
 type Mode = "gallery" | "draw" | "alive";
 
 export const TraceDrawingTask: FC<TaskProps<Cfg>> = ({ config, onComplete }) => {
-  const partCoverage = Math.min(0.92, Math.max(0.45, (config.partCoverage ?? 62) / 100));
+  const partCoverage = Math.min(0.98, Math.max(0.8, (config.partCoverage ?? 90) / 100));
   const strokeWidth = config.strokeWidth ?? 16;
   const drawingsToWin = Math.max(1, Math.round(config.drawingsToWin ?? 2));
 
@@ -204,7 +204,7 @@ export const TraceDrawingTask: FC<TaskProps<Cfg>> = ({ config, onComplete }) => 
               ? lifeReady
                 ? "Kész — folytathatod, ha szeretnéd"
                 : "A rajz életre kel…"
-              : "Rajzold körül a kiemelt részt a választott színnel"}
+              : "Rajzold teljesen körül a kiemelt részt — csak akkor töltődik ki"}
           </p>
         </div>
         <div className="flex flex-wrap gap-2">
