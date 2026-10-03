@@ -317,7 +317,9 @@ function AppRoutes() {
         {screen.name === "parent" && (
           <MotionScreen key="parent" className="h-full">
             <AppShell title="Szülőpanel" onBack={goHome}>
-              <ParentPanel onClose={goHome} />
+              <div className="mx-auto flex h-[calc(100dvh-7.5rem)] min-h-0 w-full max-w-4xl flex-col sm:h-[calc(100dvh-8.5rem)]">
+                <ParentPanel onClose={goHome} />
+              </div>
             </AppShell>
           </MotionScreen>
         )}
@@ -415,10 +417,18 @@ function TaskScreen({
     ? `Sorozat ${playlist.index + 1}/${playlist.items.length}`
     : mod.title;
 
+  const isDrawing = moduleId === "drawing";
+
   return (
     <MotionScreen className="h-full">
       <AppShell onBack={onBack} title={task.title} subtitle={playlistLabel}>
-        <GlassCard className="mx-auto max-w-xl p-4 sm:p-6">
+        <GlassCard
+          className={
+            isDrawing
+              ? "mx-auto flex h-[calc(100dvh-7.5rem)] min-h-0 w-full max-w-6xl flex-col !p-3 sm:h-[calc(100dvh-8.5rem)] sm:!p-4 md:!p-5"
+              : "mx-auto max-w-xl p-4 sm:p-6"
+          }
+        >
           <TaskComponent
             key={`${taskId}-${JSON.stringify(config)}`}
             config={config}

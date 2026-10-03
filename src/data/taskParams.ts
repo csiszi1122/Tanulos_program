@@ -140,6 +140,60 @@ export const TASK_PARAM_SCHEMAS: TaskParamSchema[] = [
       { key: "optionCount", label: "Válaszlehetőségek", min: 2, max: 8, default: 4 },
     ],
   },
+  {
+    taskId: "trace-drawing",
+    moduleId: "drawing",
+    title: "Vonalrajz műhely",
+    params: [
+      {
+        key: "winCoverage",
+        label: "Szükséges fedés %",
+        min: 50,
+        max: 95,
+        step: 1,
+        default: 70,
+      },
+      {
+        key: "strokeWidth",
+        label: "Vonalvastagság (tablet)",
+        min: 10,
+        max: 40,
+        step: 1,
+        default: 22,
+      },
+      {
+        key: "drawingsToWin",
+        label: "Képek a jutalomhoz",
+        min: 1,
+        max: 10,
+        step: 1,
+        default: 2,
+      },
+    ],
+  },
+  {
+    taskId: "color-fill",
+    moduleId: "drawing",
+    title: "Színező műhely",
+    params: [
+      {
+        key: "picturesToWin",
+        label: "Képek a jutalomhoz",
+        min: 1,
+        max: 10,
+        step: 1,
+        default: 2,
+      },
+      {
+        key: "strokeWidth",
+        label: "Vonalvastagság (tablet)",
+        min: 10,
+        max: 36,
+        step: 1,
+        default: 18,
+      },
+    ],
+  },
 ];
 
 export type TaskParamsMap = Record<string, Record<string, number>>;

@@ -30,6 +30,16 @@ export const DEFAULT_PLAYLISTS: Playlist[] = [
       { moduleId: "language", taskId: "reading-cards" },
     ],
   },
+  {
+    id: "creative-break",
+    title: "Kreatív szünet",
+    description: "Rajzolás tabletre",
+    items: [
+      { moduleId: "drawing", taskId: "trace-drawing", title: "Vonalrajz" },
+      { moduleId: "drawing", taskId: "color-fill", title: "Színező" },
+      { moduleId: "memory", taskId: "card-memory" },
+    ],
+  },
 ];
 
 export function parsePlaylists(json?: string | null): Playlist[] {

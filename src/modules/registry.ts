@@ -4,6 +4,7 @@ import { languageModule } from "./language";
 import { logicModule } from "./logic";
 import { memoryModule } from "./memory";
 import { englishModule } from "./english";
+import { drawingModule } from "./drawing";
 
 const ALL_MODULES: EducationalModule[] = [
   mathModule,
@@ -11,6 +12,7 @@ const ALL_MODULES: EducationalModule[] = [
   logicModule,
   memoryModule,
   englishModule,
+  drawingModule,
 ];
 
 export function getModules(includeDisabled = false, enabledCsv?: string): EducationalModule[] {

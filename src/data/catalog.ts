@@ -5,6 +5,10 @@ export const ACHIEVEMENT_CATALOG = [
   { key: "logic_starter", title: "Logikus elme", emoji: "🧩", description: "Oldj meg egy logikai feladatot" },
   { key: "memory_starter", title: "Emlékező", emoji: "🧠", description: "Oldj meg egy memória feladatot" },
   { key: "english_starter", title: "Hello World", emoji: "🇬🇧", description: "Oldj meg egy angol feladatot" },
+  { key: "drawing_starter", title: "Kis művész", emoji: "✏️", description: "Rajzolj meg az első képet" },
+  { key: "drawing_pro", title: "Vonalmester", emoji: "🎨", description: "Fejezd be a vonalrajz műhelyt" },
+  { key: "color_pro", title: "Színmester", emoji: "🌈", description: "Fejezd be a színező műhelyt" },
+  { key: "drawing_gallery", title: "Képtár-járó", emoji: "🖼️", description: "Próbálj ki 5 különböző rajzot" },
   { key: "first_100", title: "100 pont", emoji: "💯", description: "Gyűjts össze 100 pontot" },
   { key: "points_250", title: "250 pont", emoji: "🎖️", description: "Gyűjts össze 250 pontot" },
   { key: "points_500", title: "500 pont", emoji: "🏆", description: "Gyűjts össze 500 pontot" },
@@ -70,6 +74,9 @@ export const STICKER_CATALOG = [
   { id: "heart", emoji: "💙", title: "Szív" },
   { id: "leaf", emoji: "🍃", title: "Levél" },
   { id: "wave", emoji: "🌊", title: "Hullám" },
+  { id: "palette", emoji: "🎨", title: "Paletta" },
+  { id: "pencil", emoji: "✏️", title: "Ceruza" },
+  { id: "frame", emoji: "🖼️", title: "Keret" },
 ] as const;
 
 export function stickerEmoji(id: string): string {

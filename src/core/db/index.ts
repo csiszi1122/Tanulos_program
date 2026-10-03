@@ -139,7 +139,7 @@ export async function ensureSettings(): Promise<AppSettings> {
       soundEnabled: true,
       parentPin: "1234",
       dailyGoal: 3,
-      enabledModules: "math,language,logic,memory,english",
+      enabledModules: "math,language,logic,memory,english,drawing",
       taskParamsJson: serializeTaskParams(defaultTaskParams()),
       themeMode: "vivid",
       dailyPlayMinutesLimit: 0,
@@ -169,6 +169,10 @@ export async function ensureSettings(): Promise<AppSettings> {
   }
   if (!settings.playlistJson) {
     settings.playlistJson = serializePlaylists(DEFAULT_PLAYLISTS);
+    patched = true;
+  }
+  if (settings.enabledModules && !settings.enabledModules.split(",").includes("drawing")) {
+    settings.enabledModules = `${settings.enabledModules},drawing`;
     patched = true;
   }
   if (patched) await db.settings.put(settings);

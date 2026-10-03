@@ -28,6 +28,8 @@ const TASK_ACH: Record<string, { key: string; title: string; sticker?: string }>
   "number-sequence": { key: "sequence_pro", title: "Sorrendmester", sticker: "shield" },
   "card-memory": { key: "card_memory_pro", title: "Kártyamemória", sticker: "crystal" },
   "english-words": { key: "english_words_pro", title: "Word hero", sticker: "sun" },
+  "trace-drawing": { key: "drawing_pro", title: "Vonalmester", sticker: "palette" },
+  "color-fill": { key: "color_pro", title: "Színmester", sticker: "frame" },
   lightning: { key: "lightning", title: "Villámgyors", sticker: "comet" },
   multiplication: { key: "times_table", title: "Szorzótábla-mester", sticker: "medal" },
 };
@@ -38,6 +40,7 @@ const MODULE_START = {
   logic: { key: "logic_starter", title: "Logikus elme", sticker: "puzzle" },
   memory: { key: "memory_starter", title: "Emlékező", sticker: "owl" },
   english: { key: "english_starter", title: "Hello World", sticker: "flag" },
+  drawing: { key: "drawing_starter", title: "Kis művész", sticker: "pencil" },
 } as const;
 
 async function tryAchieve(
