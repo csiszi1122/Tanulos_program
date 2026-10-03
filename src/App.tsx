@@ -425,7 +425,7 @@ function TaskScreen({
         <GlassCard
           className={
             isDrawing
-              ? "mx-auto flex h-[calc(100dvh-7.5rem)] min-h-0 w-full max-w-6xl flex-col !p-3 sm:h-[calc(100dvh-8.5rem)] sm:!p-4 md:!p-5"
+              ? "mx-auto flex h-[calc(100dvh-7.5rem)] min-h-0 w-full max-w-6xl flex-col !border-white/40 !bg-white/90 !p-2 shadow-2xl sm:h-[calc(100dvh-8.5rem)] sm:!p-3 md:!p-4"
               : "mx-auto max-w-xl p-4 sm:p-6"
           }
         >

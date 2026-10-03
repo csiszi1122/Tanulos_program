@@ -146,20 +146,20 @@ export const TASK_PARAM_SCHEMAS: TaskParamSchema[] = [
     title: "Vonalrajz műhely",
     params: [
       {
-        key: "winCoverage",
-        label: "Szükséges fedés %",
-        min: 50,
-        max: 95,
+        key: "partCoverage",
+        label: "Rész körberajzolás %",
+        min: 45,
+        max: 90,
         step: 1,
-        default: 70,
+        default: 60,
       },
       {
         key: "strokeWidth",
         label: "Vonalvastagság (tablet)",
         min: 10,
-        max: 40,
+        max: 36,
         step: 1,
-        default: 22,
+        default: 16,
       },
       {
         key: "drawingsToWin",

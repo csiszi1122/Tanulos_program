@@ -288,29 +288,51 @@ export function svgPath(d: string, view = 100): Pt[] {
   return out;
 }
 
-export function scalePaths(paths: Pt[][], pad = 0.08): Pt[][] {
-  let minX = 1;
-  let minY = 1;
-  let maxX = 0;
-  let maxY = 0;
+/** Fit all paths into the unit square with padding — never overflow the canvas. */
+export function scalePaths(paths: Pt[][], pad = 0.12): Pt[][] {
+  let minX = Infinity;
+  let minY = Infinity;
+  let maxX = -Infinity;
+  let maxY = -Infinity;
+  let any = false;
   for (const path of paths) {
     for (const p of path) {
+      any = true;
       minX = Math.min(minX, p.x);
       minY = Math.min(minY, p.y);
       maxX = Math.max(maxX, p.x);
       maxY = Math.max(maxY, p.y);
     }
   }
+  if (!any) return paths;
   const w = Math.max(1e-6, maxX - minX);
   const h = Math.max(1e-6, maxY - minY);
-  const size = Math.max(w, h);
-  const ox = (1 - size) / 2;
-  const oy = (1 - size) / 2;
   const usable = 1 - pad * 2;
+  const scale = usable / Math.max(w, h);
+  const contentW = w * scale;
+  const contentH = h * scale;
+  const ox = (1 - contentW) / 2;
+  const oy = (1 - contentH) / 2;
+  const clamp = (v: number) => Math.min(1 - pad * 0.25, Math.max(pad * 0.25, v));
   return paths.map((path) =>
     path.map((p) => ({
-      x: pad + ox * usable + ((p.x - minX) / size) * usable + ((size - w) / 2 / size) * usable,
-      y: pad + oy * usable + ((p.y - minY) / size) * usable + ((size - h) / 2 / size) * usable,
+      x: clamp(ox + (p.x - minX) * scale),
+      y: clamp(oy + (p.y - minY) * scale),
     })),
   );
+}
+
+export function pointInPoly(p: Pt, poly: Pt[]): boolean {
+  let inside = false;
+  for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
+    const xi = poly[i].x;
+    const yi = poly[i].y;
+    const xj = poly[j].x;
+    const yj = poly[j].y;
+    const intersect =
+      yi > p.y !== yj > p.y &&
+      p.x < ((xj - xi) * (p.y - yi)) / (yj - yi + 1e-12) + xi;
+    if (intersect) inside = !inside;
+  }
+  return inside;
 }

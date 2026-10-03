@@ -27,7 +27,7 @@ function T(
   color: string,
   paths: Pt[][],
 ): DrawingTemplate {
-  return { id, title, emoji, category, color, paths: scalePaths(paths, 0.07) };
+  return { id, title, emoji, category, color, paths: scalePaths(paths, 0.14) };
 }
 
 const C = {

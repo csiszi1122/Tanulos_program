@@ -49,7 +49,7 @@ function CT(
   strokes: ColorStroke[] = [],
 ): ColorTemplate {
   const all = [...regions.map((r) => r.points), ...strokes.map((s) => s.points)];
-  const scaled = scalePaths(all, 0.07);
+  const scaled = scalePaths(all, 0.14);
   const nr = regions.map((r, i) => ({ ...r, points: scaled[i] }));
   const ns = strokes.map((s, i) => ({
     ...s,

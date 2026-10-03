@@ -1,7 +1,22 @@
-import type { DrawingTemplate, Pt } from "./pathMath";
-import { dist, lerp, pointOnPath, resamplePath, smoothPath } from "./pathMath";
+import type { ColorRegion, ColorTemplate } from "../data/colorTemplates";
+import { dist, lerp, pointInPoly, pointOnPath, resamplePath, type Pt } from "./pathMath";
+import {
+  lifeAccentPoint,
+  lifeStyleFor,
+  lifeTransform,
+  type LifeStyle,
+} from "./lifeAnim";
 
-type Sample = Pt & { covered: boolean; pathIndex: number };
+type Sample = Pt & { covered: boolean };
+
+type PartState = {
+  region: ColorRegion;
+  samples: Sample[];
+  fillColor: string | null;
+  fillProgress: number; // 0..1 expand anim
+  fillOrigin: Pt;
+  outlineDone: boolean;
+};
 
 type Particle = {
   x: number;
@@ -12,15 +27,17 @@ type Particle = {
   max: number;
   color: string;
   size: number;
-  kind: "spark" | "ink" | "bloom" | "ripple";
+  kind: "spark" | "ink" | "bloom" | "ripple" | "star";
 };
 
 export type TraceEngineOptions = {
   strokeWidth?: number;
   hitRadius?: number;
-  winCoverage?: number;
-  onCoverage?: (coverage: number) => void;
-  onWin?: () => void;
+  partCoverage?: number;
+  onProgress?: (ratio: number, activeLabel: string | null) => void;
+  onPartComplete?: (label: string, color: string) => void;
+  onAllComplete?: () => void;
+  onLifeDone?: () => void;
 };
 
 export class TraceEngine {
@@ -29,23 +46,23 @@ export class TraceEngine {
   private dpr = 1;
   private cssW = 0;
   private cssH = 0;
-  private pad = 32;
-  private template: DrawingTemplate | null = null;
-  private samples: Sample[] = [];
-  private userStrokes: Pt[][] = [];
+  private pad = 36;
+  private template: ColorTemplate | null = null;
+  private parts: PartState[] = [];
+  private activeIndex = 0;
+  private color = "#2563eb";
+  private userStrokes: Array<{ pts: Pt[]; color: string }> = [];
   private currentStroke: Pt[] | null = null;
   private particles: Particle[] = [];
   private raf = 0;
   private t0 = performance.now();
   private guideT = -1;
-  private guidePath = 0;
-  private guideTrail: Pt[] = [];
-  private won = false;
-  private winT = 0;
   private drawing = false;
+  private phase: "draw" | "life" | "done" = "draw";
+  private lifeT = 0;
+  private lifeStyle: LifeStyle = "wiggle";
   private opts: Required<TraceEngineOptions>;
   private unsubscribers: Array<() => void> = [];
-  private grainCanvas: HTMLCanvasElement | null = null;
 
   constructor(canvas: HTMLCanvasElement, opts: TraceEngineOptions = {}) {
     const ctx = canvas.getContext("2d");
@@ -53,54 +70,73 @@ export class TraceEngine {
     this.canvas = canvas;
     this.ctx = ctx;
     this.opts = {
-      strokeWidth: opts.strokeWidth ?? 18,
-      hitRadius: opts.hitRadius ?? 0.055,
-      winCoverage: opts.winCoverage ?? 0.72,
-      onCoverage: opts.onCoverage ?? (() => undefined),
-      onWin: opts.onWin ?? (() => undefined),
+      strokeWidth: opts.strokeWidth ?? 16,
+      hitRadius: opts.hitRadius ?? 0.06,
+      partCoverage: opts.partCoverage ?? 0.62,
+      onProgress: opts.onProgress ?? (() => undefined),
+      onPartComplete: opts.onPartComplete ?? (() => undefined),
+      onAllComplete: opts.onAllComplete ?? (() => undefined),
+      onLifeDone: opts.onLifeDone ?? (() => undefined),
     };
     this.bindPointer();
     this.loop = this.loop.bind(this);
     this.raf = requestAnimationFrame(this.loop);
   }
 
-  setOptions(partial: Partial<TraceEngineOptions>) {
-    this.opts = { ...this.opts, ...partial } as Required<TraceEngineOptions>;
+  setColor(hex: string) {
+    this.color = hex;
   }
 
-  setTemplate(template: DrawingTemplate) {
+  getColor() {
+    return this.color;
+  }
+
+  setTemplate(template: ColorTemplate) {
     this.template = template;
-    this.won = false;
-    this.winT = 0;
+    this.phase = "draw";
+    this.lifeT = 0;
+    this.lifeStyle = lifeStyleFor(template.id, template.category);
     this.userStrokes = [];
     this.currentStroke = null;
-    this.guideT = -1;
-    this.guideTrail = [];
     this.particles = [];
-    this.rebuildSamples();
-    this.opts.onCoverage(0);
+    this.guideT = -1;
+    this.parts = template.regions.map((region) => ({
+      region,
+      samples: resamplePath(region.points, 0.014).map((p) => ({
+        ...p,
+        covered: false,
+      })),
+      fillColor: null,
+      fillProgress: 0,
+      fillOrigin: { x: 0.5, y: 0.5 },
+      outlineDone: false,
+    }));
+    this.activeIndex = 0;
+    this.emitProgress();
+    window.setTimeout(() => this.playGuide(), 500);
   }
 
   clearUser() {
-    this.userStrokes = [];
-    this.currentStroke = null;
-    this.won = false;
-    this.winT = 0;
-    this.particles = [];
-    for (const s of this.samples) s.covered = false;
-    this.opts.onCoverage(0);
+    if (!this.template) return;
+    this.setTemplate(this.template);
   }
 
   playGuide() {
+    if (this.phase !== "draw") return;
     this.guideT = 0;
-    this.guidePath = 0;
-    this.guideTrail = [];
   }
 
-  getCoverage(): number {
-    if (!this.samples.length) return 0;
-    const covered = this.samples.filter((s) => s.covered).length;
-    return covered / this.samples.length;
+  getProgress(): number {
+    if (!this.parts.length) return 0;
+    return this.parts.filter((p) => p.outlineDone).length / this.parts.length;
+  }
+
+  getActiveLabel(): string | null {
+    return this.parts[this.activeIndex]?.region.label ?? null;
+  }
+
+  getPhase() {
+    return this.phase;
   }
 
   resize(cssW: number, cssH: number) {
@@ -112,23 +148,15 @@ export class TraceEngine {
     this.canvas.style.width = `${this.cssW}px`;
     this.canvas.style.height = `${this.cssH}px`;
     this.ctx.setTransform(this.dpr, 0, 0, this.dpr, 0, 0);
-    this.grainCanvas = null;
   }
 
   destroy() {
     cancelAnimationFrame(this.raf);
     for (const off of this.unsubscribers) off();
-    this.unsubscribers = [];
   }
 
-  private rebuildSamples() {
-    this.samples = [];
-    if (!this.template) return;
-    this.template.paths.forEach((path, pathIndex) => {
-      for (const p of resamplePath(path, 0.012)) {
-        this.samples.push({ ...p, covered: false, pathIndex });
-      }
-    });
+  private emitProgress() {
+    this.opts.onProgress(this.getProgress(), this.getActiveLabel());
   }
 
   private toCanvas(p: Pt): Pt {
@@ -136,6 +164,14 @@ export class TraceEngine {
     const ox = (this.cssW - size) / 2;
     const oy = (this.cssH - size) / 2;
     return { x: ox + p.x * size, y: oy + p.y * size };
+  }
+
+  private mapPt(p: Pt): Pt {
+    if (this.phase === "life" || this.phase === "done") {
+      const intensity = this.phase === "done" ? 0.35 : 1;
+      return this.toCanvas(lifeTransform(p, this.lifeStyle, this.lifeT, intensity));
+    }
+    return this.toCanvas(p);
   }
 
   private toNorm(clientX: number, clientY: number): Pt | null {
@@ -149,11 +185,14 @@ export class TraceEngine {
     return { x: (x - ox) / size, y: (y - oy) / size };
   }
 
-  /** Soft magnetic pull toward nearest uncovered guide sample. */
-  private magnetize(p: Pt): Pt {
+  private activePart(): PartState | null {
+    return this.parts[this.activeIndex] ?? null;
+  }
+
+  private magnetize(p: Pt, part: PartState): Pt {
     let best: Sample | null = null;
-    let bestD = this.opts.hitRadius * 1.6;
-    for (const s of this.samples) {
+    let bestD = this.opts.hitRadius * 1.8;
+    for (const s of part.samples) {
       if (s.covered) continue;
       const d = dist(s, p);
       if (d < bestD) {
@@ -162,80 +201,122 @@ export class TraceEngine {
       }
     }
     if (!best) return p;
-    const pull = 1 - bestD / (this.opts.hitRadius * 1.6);
-    return lerp(p, best, pull * 0.55);
+    return lerp(p, best, (1 - bestD / (this.opts.hitRadius * 1.8)) * 0.65);
   }
 
   private coverNear(p: Pt) {
-    const r = this.opts.hitRadius;
+    const part = this.activePart();
+    if (!part || part.outlineDone || this.phase !== "draw") return;
     let changed = false;
-    for (const s of this.samples) {
+    for (const s of part.samples) {
       if (s.covered) continue;
-      if (dist(s, p) <= r) {
+      if (dist(s, p) <= this.opts.hitRadius) {
         s.covered = true;
         changed = true;
       }
     }
-    if (changed) {
-      const c = this.getCoverage();
-      this.opts.onCoverage(c);
-      if (!this.won && c >= this.opts.winCoverage) {
-        this.won = true;
-        this.winT = 0;
-        this.celebrationBurst(p);
-        this.opts.onWin();
-      }
+    if (!changed) return;
+
+    const cov =
+      part.samples.filter((s) => s.covered).length / Math.max(1, part.samples.length);
+    this.emitProgress();
+
+    // Closed loop heuristic: stroke ends near start and covers enough
+    const loopBonus =
+      this.currentStroke &&
+      this.currentStroke.length > 12 &&
+      dist(this.currentStroke[0], p) < 0.08
+        ? 0.12
+        : 0;
+
+    if (cov + loopBonus >= this.opts.partCoverage) {
+      this.completePart(part, p);
     }
   }
 
-  private celebrationBurst(p: Pt) {
-    const c = this.toCanvas(p);
-    const color = this.template?.color ?? "#f43f5e";
-    for (let i = 0; i < 90; i++) {
+  private completePart(part: PartState, origin: Pt) {
+    if (part.outlineDone) return;
+    part.outlineDone = true;
+    part.fillColor = this.color;
+    part.fillProgress = 0;
+    // centroid-ish origin inside region
+    let cx = 0;
+    let cy = 0;
+    for (const q of part.region.points) {
+      cx += q.x;
+      cy += q.y;
+    }
+    const n = part.region.points.length || 1;
+    part.fillOrigin = pointInPoly(origin, part.region.points)
+      ? origin
+      : { x: cx / n, y: cy / n };
+
+    this.burst(part.fillOrigin, this.color, 55);
+    this.opts.onPartComplete(part.region.label, this.color);
+
+    // advance to next unfinished
+    const next = this.parts.findIndex((p) => !p.outlineDone);
+    this.activeIndex = next === -1 ? this.parts.length : next;
+    this.guideT = next === -1 ? -1 : 0;
+    this.emitProgress();
+
+    if (next === -1) {
+      this.startLife();
+    }
+  }
+
+  private startLife() {
+    this.phase = "life";
+    this.lifeT = 0;
+    this.opts.onAllComplete();
+    // long celebration particles
+    for (let i = 0; i < 120; i++) {
       const a = Math.random() * Math.PI * 2;
-      const sp = 2 + Math.random() * 7;
+      const c = this.toCanvas({ x: 0.5, y: 0.5 });
+      this.particles.push({
+        x: c.x,
+        y: c.y,
+        vx: Math.cos(a) * (2 + Math.random() * 6),
+        vy: Math.sin(a) * (2 + Math.random() * 6) - 2,
+        life: 1,
+        max: 1.2 + Math.random(),
+        color: this.parts[i % this.parts.length]?.fillColor ?? "#fff",
+        size: 3 + Math.random() * 8,
+        kind: i % 5 === 0 ? "star" : "spark",
+      });
+    }
+  }
+
+  private burst(p: Pt, color: string, n: number) {
+    const c = this.toCanvas(p);
+    for (let i = 0; i < n; i++) {
+      const a = Math.random() * Math.PI * 2;
+      const sp = 1.5 + Math.random() * 5;
       this.particles.push({
         x: c.x,
         y: c.y,
         vx: Math.cos(a) * sp,
-        vy: Math.sin(a) * sp - 1,
+        vy: Math.sin(a) * sp - 0.8,
         life: 1,
-        max: 0.8 + Math.random() * 0.9,
-        color: i % 3 === 0 ? "#fff" : color,
-        size: 3 + Math.random() * 7,
-        kind: i % 4 === 0 ? "bloom" : "spark",
+        max: 0.6 + Math.random() * 0.7,
+        color: i % 4 === 0 ? "#fff" : color,
+        size: 2.5 + Math.random() * 6,
+        kind: i % 3 === 0 ? "bloom" : "ink",
       });
     }
-    for (let i = 0; i < 4; i++) {
+    for (let i = 0; i < 3; i++) {
       this.particles.push({
         x: c.x,
         y: c.y,
         vx: 0,
         vy: 0,
         life: 1,
-        max: 0.55 + i * 0.12,
+        max: 0.5 + i * 0.15,
         color,
-        size: 20 + i * 28,
+        size: 18 + i * 26,
         kind: "ripple",
       });
     }
-  }
-
-  private spawnInkTrail(p: Pt, boost = false) {
-    if (!boost && Math.random() > 0.55) return;
-    const c = this.toCanvas(p);
-    const color = this.template?.color ?? "#334155";
-    this.particles.push({
-      x: c.x + (Math.random() - 0.5) * 4,
-      y: c.y + (Math.random() - 0.5) * 4,
-      vx: (Math.random() - 0.5) * 0.8,
-      vy: (Math.random() - 0.5) * 0.8 - 0.2,
-      life: 1,
-      max: 0.28 + Math.random() * 0.35,
-      color,
-      size: (boost ? 4 : 2) + Math.random() * 3,
-      kind: "ink",
-    });
   }
 
   private bindPointer() {
@@ -243,27 +324,28 @@ export class TraceEngine {
     el.style.touchAction = "none";
 
     const down = (e: PointerEvent) => {
-      if (this.won) return;
+      if (this.phase !== "draw") return;
       el.setPointerCapture(e.pointerId);
       this.drawing = true;
       let n = this.toNorm(e.clientX, e.clientY);
-      if (!n) return;
-      n = this.magnetize(n);
+      const part = this.activePart();
+      if (!n || !part) return;
+      n = this.magnetize(n, part);
       this.currentStroke = [n];
       this.coverNear(n);
-      this.spawnInkTrail(n, true);
     };
 
     const move = (e: PointerEvent) => {
-      if (!this.drawing || !this.currentStroke) return;
+      if (!this.drawing || !this.currentStroke || this.phase !== "draw") return;
+      const part = this.activePart();
+      if (!part) return;
       let n = this.toNorm(e.clientX, e.clientY);
       if (!n) return;
-      n = this.magnetize(n);
+      n = this.magnetize(n, part);
       const last = this.currentStroke[this.currentStroke.length - 1];
       if (dist(last, n) < 0.003) return;
       this.currentStroke.push(n);
       this.coverNear(n);
-      this.spawnInkTrail(n);
     };
 
     const up = (e: PointerEvent) => {
@@ -274,8 +356,20 @@ export class TraceEngine {
       } catch {
         /* ignore */
       }
-      if (this.currentStroke && this.currentStroke.length > 1) {
-        this.userStrokes.push(smoothPath(this.currentStroke, 1));
+      if (this.currentStroke && this.currentStroke.length > 2) {
+        this.userStrokes.push({ pts: this.currentStroke, color: this.color });
+        // final loop check
+        const part = this.activePart();
+        if (part && !part.outlineDone) {
+          const first = this.currentStroke[0];
+          const last = this.currentStroke[this.currentStroke.length - 1];
+          const cov =
+            part.samples.filter((s) => s.covered).length /
+            Math.max(1, part.samples.length);
+          if (dist(first, last) < 0.1 && cov >= this.opts.partCoverage * 0.75) {
+            this.completePart(part, last);
+          }
+        }
       }
       this.currentStroke = null;
     };
@@ -296,339 +390,292 @@ export class TraceEngine {
     this.raf = requestAnimationFrame(this.loop);
     const dt = Math.min(0.033, (now - this.t0) / 1000);
     this.t0 = now;
-    this.tickGuide(dt);
-    this.tickParticles(dt);
-    if (this.won) this.winT += dt;
-    this.draw(now);
-  }
 
-  private tickGuide(dt: number) {
-    if (this.guideT < 0 || !this.template) return;
-    this.guideT += dt * 0.48;
-    const paths = this.template.paths;
-    const path = paths[this.guidePath];
-    if (path) {
-      const gp = pointOnPath(path, Math.min(1, this.guideT));
-      this.guideTrail.push(gp);
-      if (this.guideTrail.length > 48) this.guideTrail.shift();
-      this.spawnInkTrail(gp, true);
-    }
-    if (this.guideT >= 1) {
-      this.guideT = 0;
-      this.guideTrail = [];
-      this.guidePath += 1;
-      if (this.guidePath >= paths.length) {
-        this.guideT = -1;
-        this.guidePath = 0;
+    for (const part of this.parts) {
+      if (part.fillColor && part.fillProgress < 1) {
+        part.fillProgress = Math.min(1, part.fillProgress + dt * 1.8);
       }
     }
-  }
 
-  private tickParticles(dt: number) {
+    if (this.guideT >= 0 && this.phase === "draw") {
+      this.guideT += dt * 0.45;
+      if (this.guideT >= 1) this.guideT = -1;
+    }
+
+    if (this.phase === "life") {
+      this.lifeT += dt;
+      // ambient sparkles while alive
+      if (Math.random() < 0.35) {
+        const ap = lifeAccentPoint(this.lifeStyle, this.lifeT);
+        const c = this.toCanvas(ap);
+        this.particles.push({
+          x: c.x,
+          y: c.y,
+          vx: (Math.random() - 0.5) * 2,
+          vy: -1 - Math.random() * 2,
+          life: 1,
+          max: 0.8 + Math.random() * 0.6,
+          color: "#fde68a",
+          size: 2 + Math.random() * 4,
+          kind: "star",
+        });
+      }
+      // ~7.5s life show then settle
+      if (this.lifeT >= 7.5) {
+        this.phase = "done";
+        this.opts.onLifeDone();
+      }
+    }
+
     for (const p of this.particles) {
       if (p.kind === "ripple") {
         p.size += 90 * dt;
         p.life -= dt / p.max;
-        continue;
+      } else {
+        p.x += p.vx * 60 * dt;
+        p.y += p.vy * 60 * dt;
+        p.vy += 28 * dt;
+        p.life -= dt / p.max;
       }
-      p.x += p.vx * 60 * dt;
-      p.y += p.vy * 60 * dt;
-      if (p.kind === "spark" || p.kind === "bloom") p.vy += 55 * dt;
-      else p.vy += 12 * dt;
-      p.life -= dt / p.max;
     }
     this.particles = this.particles.filter((p) => p.life > 0);
-  }
 
-  private ensureGrain() {
-    if (this.grainCanvas) return this.grainCanvas;
-    const g = document.createElement("canvas");
-    g.width = 128;
-    g.height = 128;
-    const gctx = g.getContext("2d");
-    if (!gctx) return null;
-    const img = gctx.createImageData(128, 128);
-    for (let i = 0; i < img.data.length; i += 4) {
-      const v = 220 + Math.floor(Math.random() * 30);
-      img.data[i] = v;
-      img.data[i + 1] = v;
-      img.data[i + 2] = v;
-      img.data[i + 3] = 18;
-    }
-    gctx.putImageData(img, 0, 0);
-    this.grainCanvas = g;
-    return g;
-  }
-
-  private drawPaper() {
-    const { ctx, cssW, cssH } = this;
-    // studio paper
-    const grd = ctx.createLinearGradient(0, 0, cssW, cssH);
-    grd.addColorStop(0, "#fffdf8");
-    grd.addColorStop(0.55, "#f7f3eb");
-    grd.addColorStop(1, "#efe8dc");
-    ctx.fillStyle = grd;
-    roundRect(ctx, 6, 6, cssW - 12, cssH - 12, 24);
-    ctx.fill();
-
-    // subtle grid
-    ctx.save();
-    ctx.strokeStyle = "rgba(148,163,184,0.12)";
-    ctx.lineWidth = 1;
-    const step = 28;
-    for (let x = 20; x < cssW - 10; x += step) {
-      ctx.beginPath();
-      ctx.moveTo(x, 14);
-      ctx.lineTo(x, cssH - 14);
-      ctx.stroke();
-    }
-    for (let y = 20; y < cssH - 10; y += step) {
-      ctx.beginPath();
-      ctx.moveTo(14, y);
-      ctx.lineTo(cssW - 14, y);
-      ctx.stroke();
-    }
-    ctx.restore();
-
-    const grain = this.ensureGrain();
-    if (grain) {
-      ctx.save();
-      ctx.globalAlpha = 0.55;
-      const pattern = ctx.createPattern(grain, "repeat");
-      if (pattern) {
-        ctx.fillStyle = pattern;
-        roundRect(ctx, 6, 6, cssW - 12, cssH - 12, 24);
-        ctx.fill();
-      }
-      ctx.restore();
-    }
-
-    // soft inner shadow rim
-    ctx.save();
-    ctx.strokeStyle = "rgba(15,23,42,0.08)";
-    ctx.lineWidth = 2;
-    roundRect(ctx, 7, 7, cssW - 14, cssH - 14, 23);
-    ctx.stroke();
-    ctx.restore();
+    this.draw(now);
   }
 
   private draw(now: number) {
     const { ctx, cssW, cssH } = this;
     ctx.clearRect(0, 0, cssW, cssH);
-    this.drawPaper();
+
+    // premium paper studio
+    const g = ctx.createLinearGradient(0, 0, cssW, cssH);
+    g.addColorStop(0, "#f8fafc");
+    g.addColorStop(0.5, "#ffffff");
+    g.addColorStop(1, "#f1f5f9");
+    ctx.fillStyle = g;
+    roundRect(ctx, 6, 6, cssW - 12, cssH - 12, 28);
+    ctx.fill();
+
+    // soft vignette
+    const vg = ctx.createRadialGradient(
+      cssW / 2,
+      cssH / 2,
+      Math.min(cssW, cssH) * 0.2,
+      cssW / 2,
+      cssH / 2,
+      Math.min(cssW, cssH) * 0.72,
+    );
+    vg.addColorStop(0, "rgba(255,255,255,0)");
+    vg.addColorStop(1, "rgba(15,23,42,0.06)");
+    ctx.fillStyle = vg;
+    roundRect(ctx, 6, 6, cssW - 12, cssH - 12, 28);
+    ctx.fill();
 
     if (!this.template) return;
-    const color = this.template.color;
     const pulse = 0.5 + 0.5 * Math.sin(now * 0.005);
 
-    // ghost dashed guides
-    ctx.save();
-    ctx.lineCap = "round";
-    ctx.lineJoin = "round";
-    ctx.setLineDash([7, 11]);
-    ctx.lineDashOffset = -now * 0.045;
-    ctx.strokeStyle = `rgba(100,116,139,${0.28 + pulse * 0.12})`;
-    ctx.lineWidth = Math.max(2.5, this.opts.strokeWidth * 0.38);
-    for (const path of this.template.paths) this.strokeNorm(path);
-    ctx.restore();
-
-    // soft color underlay
-    ctx.save();
-    ctx.globalAlpha = 0.18;
-    ctx.strokeStyle = color;
-    ctx.lineWidth = Math.max(4, this.opts.strokeWidth * 0.5);
-    ctx.lineCap = "round";
-    ctx.lineJoin = "round";
-    for (const path of this.template.paths) this.strokeNorm(path);
-    ctx.restore();
-
-    // covered ink glow
-    ctx.save();
-    ctx.strokeStyle = color;
-    ctx.shadowColor = color;
-    ctx.shadowBlur = 16;
-    ctx.lineWidth = this.opts.strokeWidth * 0.72;
-    ctx.lineCap = "round";
-    this.drawCoveredChains();
-    ctx.restore();
-
-    // user strokes — variable-width ribbon feel
-    for (const stroke of this.userStrokes) this.strokeVariable(stroke, color, 1);
-    if (this.currentStroke) this.strokeVariable(this.currentStroke, color, 0.95);
-
-    // start pulse orb
-    const start = this.template.paths[0]?.[0];
-    if (start && !this.won) {
-      const c = this.toCanvas(start);
-      ctx.beginPath();
-      ctx.arc(c.x, c.y, 12 + pulse * 10, 0, Math.PI * 2);
-      ctx.fillStyle = `rgba(255,255,255,${0.45 + pulse * 0.35})`;
-      ctx.fill();
-      ctx.beginPath();
-      ctx.arc(c.x, c.y, 7, 0, Math.PI * 2);
-      ctx.fillStyle = color;
-      ctx.shadowColor = color;
-      ctx.shadowBlur = 18;
-      ctx.fill();
-      ctx.shadowBlur = 0;
+    // filled parts
+    for (const part of this.parts) {
+      if (!part.fillColor) continue;
+      ctx.save();
+      this.pathPoly(part.region.points);
+      if (part.fillProgress < 1) {
+        const o = this.mapPt(part.fillOrigin);
+        ctx.clip();
+        ctx.beginPath();
+        ctx.arc(o.x, o.y, Math.hypot(cssW, cssH) * part.fillProgress, 0, Math.PI * 2);
+        ctx.fillStyle = part.fillColor;
+        ctx.globalAlpha = 0.94;
+        ctx.fill();
+      } else {
+        ctx.fillStyle = part.fillColor;
+        ctx.globalAlpha = 0.94;
+        ctx.fill();
+        // subtle gloss
+        ctx.clip();
+        const gloss = ctx.createLinearGradient(0, 0, 0, cssH);
+        gloss.addColorStop(0, "rgba(255,255,255,0.22)");
+        gloss.addColorStop(0.45, "rgba(255,255,255,0)");
+        ctx.fillStyle = gloss;
+        ctx.fillRect(0, 0, cssW, cssH);
+      }
+      ctx.restore();
     }
 
-    // guide orb + trailing ink
-    if (this.guideT >= 0 && this.template.paths[this.guidePath]) {
-      const path = this.template.paths[this.guidePath];
-      const gp = pointOnPath(path, this.guideT);
-      const c = this.toCanvas(gp);
+    // outlines for all parts
+    for (let i = 0; i < this.parts.length; i++) {
+      const part = this.parts[i];
+      const active = i === this.activeIndex && this.phase === "draw";
+      ctx.save();
+      ctx.lineJoin = "round";
+      ctx.lineCap = "round";
+      if (part.outlineDone) {
+        ctx.strokeStyle = "rgba(15,23,42,0.55)";
+        ctx.lineWidth = 2.5;
+      } else if (active) {
+        ctx.setLineDash([7, 10]);
+        ctx.lineDashOffset = -now * 0.05;
+        ctx.strokeStyle = `rgba(37,99,235,${0.45 + pulse * 0.35})`;
+        ctx.lineWidth = 3.5;
+        ctx.shadowColor = "rgba(37,99,235,0.45)";
+        ctx.shadowBlur = 12;
+      } else {
+        ctx.strokeStyle = "rgba(100,116,139,0.35)";
+        ctx.lineWidth = 2;
+      }
+      this.strokePoly(part.region.points);
+      ctx.restore();
 
-      if (this.guideTrail.length > 1) {
+      // covered outline glow for active part
+      if (active && !part.outlineDone) {
         ctx.save();
-        ctx.lineCap = "round";
-        ctx.lineJoin = "round";
-        ctx.strokeStyle = color;
-        ctx.shadowColor = color;
+        ctx.strokeStyle = this.color;
+        ctx.shadowColor = this.color;
         ctx.shadowBlur = 14;
-        ctx.globalAlpha = 0.9;
-        ctx.beginPath();
-        for (let i = 0; i < this.guideTrail.length; i++) {
-          const p = this.toCanvas(this.guideTrail[i]);
-          const t = i / (this.guideTrail.length - 1);
-          if (i === 0) ctx.moveTo(p.x, p.y);
-          else {
-            ctx.lineWidth = this.opts.strokeWidth * (0.35 + t * 0.65);
-            ctx.lineTo(p.x, p.y);
-          }
-        }
-        ctx.stroke();
+        ctx.lineWidth = this.opts.strokeWidth * 0.75;
+        ctx.lineCap = "round";
+        this.strokeCovered(part);
         ctx.restore();
       }
+    }
 
-      // outer glow rings
-      for (let i = 3; i >= 1; i--) {
-        ctx.beginPath();
-        ctx.arc(c.x, c.y, 10 + i * 6 + pulse * 3, 0, Math.PI * 2);
-        ctx.fillStyle = `rgba(255,255,255,${0.08 * i})`;
-        ctx.fill();
-      }
+    // user strokes
+    ctx.save();
+    ctx.lineCap = "round";
+    ctx.lineJoin = "round";
+    ctx.globalAlpha = 0.9;
+    for (const stroke of this.userStrokes) {
+      ctx.strokeStyle = stroke.color;
+      ctx.shadowColor = stroke.color;
+      ctx.shadowBlur = 8;
+      ctx.lineWidth = this.opts.strokeWidth;
+      this.strokePts(stroke.pts);
+    }
+    if (this.currentStroke) {
+      ctx.strokeStyle = this.color;
+      ctx.shadowColor = this.color;
+      ctx.shadowBlur = 10;
+      ctx.lineWidth = this.opts.strokeWidth;
+      this.strokePts(this.currentStroke);
+    }
+    ctx.restore();
+
+    // guide orb on active outline
+    const active = this.activePart();
+    if (active && this.guideT >= 0 && this.phase === "draw") {
+      const gp = pointOnPath(active.region.points, this.guideT);
+      const c = this.mapPt(gp);
       ctx.beginPath();
-      ctx.arc(c.x, c.y, 15 + pulse * 5, 0, Math.PI * 2);
-      ctx.fillStyle = color;
-      ctx.shadowColor = color;
-      ctx.shadowBlur = 28;
+      ctx.arc(c.x, c.y, 13 + pulse * 5, 0, Math.PI * 2);
+      ctx.fillStyle = this.color;
+      ctx.shadowColor = this.color;
+      ctx.shadowBlur = 20;
       ctx.fill();
       ctx.beginPath();
-      ctx.arc(c.x, c.y, 6, 0, Math.PI * 2);
+      ctx.arc(c.x, c.y, 5, 0, Math.PI * 2);
       ctx.fillStyle = "#fff";
       ctx.shadowBlur = 0;
       ctx.fill();
     }
 
+    // start pulse on active part
+    if (active && !active.outlineDone && this.phase === "draw") {
+      const start = active.region.points[0];
+      const c = this.mapPt(start);
+      ctx.beginPath();
+      ctx.arc(c.x, c.y, 9 + pulse * 7, 0, Math.PI * 2);
+      ctx.fillStyle = `rgba(37,99,235,${0.25 + pulse * 0.35})`;
+      ctx.fill();
+    }
+
+    // life glow
+    if (this.phase === "life" || this.phase === "done") {
+      ctx.save();
+      ctx.globalAlpha = 0.12 + 0.08 * Math.sin(this.lifeT * 3);
+      ctx.strokeStyle = "#f59e0b";
+      ctx.lineWidth = 10;
+      ctx.shadowColor = "#fbbf24";
+      ctx.shadowBlur = 30;
+      for (const part of this.parts) this.strokePoly(part.region.points);
+      ctx.restore();
+    }
+
     // particles
     for (const p of this.particles) {
-      ctx.save();
       ctx.globalAlpha = Math.max(0, p.life);
       if (p.kind === "ripple") {
         ctx.strokeStyle = p.color;
-        ctx.lineWidth = 3 * p.life;
+        ctx.lineWidth = 2;
         ctx.beginPath();
         ctx.arc(p.x, p.y, p.size, 0, Math.PI * 2);
         ctx.stroke();
-      } else if (p.kind === "bloom") {
-        const g = ctx.createRadialGradient(p.x, p.y, 0, p.x, p.y, p.size * 2);
-        g.addColorStop(0, p.color);
-        g.addColorStop(1, "transparent");
-        ctx.fillStyle = g;
-        ctx.beginPath();
-        ctx.arc(p.x, p.y, p.size * 2 * p.life, 0, Math.PI * 2);
-        ctx.fill();
+      } else if (p.kind === "star") {
+        ctx.fillStyle = p.color;
+        drawStar(ctx, p.x, p.y, p.size * p.life, 5);
       } else {
         ctx.fillStyle = p.color;
         ctx.beginPath();
         ctx.arc(p.x, p.y, p.size * p.life, 0, Math.PI * 2);
         ctx.fill();
       }
-      ctx.restore();
     }
-
-    if (this.won) {
-      const bloom = Math.min(1, this.winT * 1.4);
-      ctx.save();
-      ctx.globalAlpha = 0.12 + 0.18 * pulse * bloom;
-      ctx.strokeStyle = color;
-      ctx.lineWidth = this.opts.strokeWidth * (1.1 + bloom * 0.4);
-      ctx.shadowColor = color;
-      ctx.shadowBlur = 36;
-      ctx.lineCap = "round";
-      for (const path of this.template.paths) this.strokeNorm(path);
-      ctx.restore();
-    }
+    ctx.globalAlpha = 1;
   }
 
-  private strokeNorm(path: Pt[]) {
-    if (path.length < 2) return;
+  private pathPoly(points: Pt[]) {
     const { ctx } = this;
+    if (points.length < 2) return;
     ctx.beginPath();
-    const first = this.toCanvas(path[0]);
-    ctx.moveTo(first.x, first.y);
-    for (let i = 1; i < path.length; i++) {
-      const p = this.toCanvas(path[i]);
+    const f = this.mapPt(points[0]);
+    ctx.moveTo(f.x, f.y);
+    for (let i = 1; i < points.length; i++) {
+      const p = this.mapPt(points[i]);
+      ctx.lineTo(p.x, p.y);
+    }
+    ctx.closePath();
+  }
+
+  private strokePoly(points: Pt[]) {
+    const { ctx } = this;
+    if (points.length < 2) return;
+    ctx.beginPath();
+    const f = this.mapPt(points[0]);
+    ctx.moveTo(f.x, f.y);
+    for (let i = 1; i < points.length; i++) {
+      const p = this.mapPt(points[i]);
+      ctx.lineTo(p.x, p.y);
+    }
+    ctx.closePath();
+    ctx.stroke();
+  }
+
+  private strokePts(points: Pt[]) {
+    const { ctx } = this;
+    if (points.length < 2) return;
+    ctx.beginPath();
+    const f = this.mapPt(points[0]);
+    ctx.moveTo(f.x, f.y);
+    for (let i = 1; i < points.length; i++) {
+      const p = this.mapPt(points[i]);
       ctx.lineTo(p.x, p.y);
     }
     ctx.stroke();
   }
 
-  private strokeVariable(path: Pt[], color: string, alpha: number) {
-    if (path.length < 2) return;
-    const { ctx } = this;
-    const base = this.opts.strokeWidth;
-    ctx.save();
-    ctx.lineCap = "round";
-    ctx.lineJoin = "round";
-    ctx.strokeStyle = "#0f172a";
-    ctx.globalAlpha = 0.12 * alpha;
-    ctx.lineWidth = base * 1.15;
-    this.strokeNorm(path);
-    ctx.globalAlpha = alpha;
-    ctx.strokeStyle = color;
-    ctx.shadowColor = color;
-    ctx.shadowBlur = 10;
-    for (let i = 1; i < path.length; i++) {
-      const a = this.toCanvas(path[i - 1]);
-      const b = this.toCanvas(path[i]);
-      const t = i / path.length;
-      const taper = 0.65 + 0.35 * Math.sin(t * Math.PI);
-      ctx.beginPath();
-      ctx.moveTo(a.x, a.y);
-      ctx.lineTo(b.x, b.y);
-      ctx.lineWidth = base * taper;
-      ctx.stroke();
-    }
-    // bright core
-    ctx.shadowBlur = 0;
-    ctx.strokeStyle = "rgba(255,255,255,0.55)";
-    ctx.lineWidth = base * 0.28;
-    this.strokeNorm(path);
-    ctx.restore();
-  }
-
-  private drawCoveredChains() {
+  private strokeCovered(part: PartState) {
     const { ctx } = this;
     let drawing = false;
-    for (let i = 0; i < this.samples.length; i++) {
-      const s = this.samples[i];
-      const prev = this.samples[i - 1];
-      const c = this.toCanvas(s);
-      if (
-        s.covered &&
-        prev &&
-        prev.covered &&
-        prev.pathIndex === s.pathIndex &&
-        dist(prev, s) < 0.04
-      ) {
+    for (let i = 0; i < part.samples.length; i++) {
+      const s = part.samples[i];
+      const prev = part.samples[i - 1];
+      if (s.covered && prev?.covered) {
         if (!drawing) {
-          const pc = this.toCanvas(prev);
+          const pc = this.mapPt(prev);
           ctx.beginPath();
           ctx.moveTo(pc.x, pc.y);
           drawing = true;
         }
+        const c = this.mapPt(s);
         ctx.lineTo(c.x, c.y);
       } else if (drawing) {
         ctx.stroke();
@@ -655,4 +702,24 @@ function roundRect(
   ctx.arcTo(x, y + h, x, y, rr);
   ctx.arcTo(x, y, x + w, y, rr);
   ctx.closePath();
+}
+
+function drawStar(
+  ctx: CanvasRenderingContext2D,
+  x: number,
+  y: number,
+  r: number,
+  spikes: number,
+) {
+  ctx.beginPath();
+  for (let i = 0; i < spikes * 2; i++) {
+    const ang = (i * Math.PI) / spikes - Math.PI / 2;
+    const rad = i % 2 === 0 ? r : r * 0.45;
+    const px = x + Math.cos(ang) * rad;
+    const py = y + Math.sin(ang) * rad;
+    if (i === 0) ctx.moveTo(px, py);
+    else ctx.lineTo(px, py);
+  }
+  ctx.closePath();
+  ctx.fill();
 }
